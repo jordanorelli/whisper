@@ -16,10 +16,11 @@ var (
 )
 
 var options struct {
-	port int
-	host string
-	key  string
-	nick string
+	port      int
+	host      string
+	key       string
+	publicKey string
+	nick      string
 }
 
 func exit(status int, template string, args ...interface{}) {
@@ -66,5 +67,6 @@ func init() {
 	flag.IntVar(&options.port, "port", 9000, "port number")
 	flag.StringVar(&options.host, "host", "localhost", "host to connect to")
 	flag.StringVar(&options.key, "key", "whisper_key", "rsa key to use")
+	flag.StringVar(&options.publicKey, "public-key", "", "public rsa key to use")
 	flag.StringVar(&options.nick, "nick", "", "nick to use in chat")
 }

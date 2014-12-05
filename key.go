@@ -20,7 +20,7 @@ func generate() {
 }
 
 func encrypt() {
-	key, err := readKey()
+	key, err := publicKey()
 	if err != nil {
 		exit(1, "couldn't setup key: %v", err)
 	}
@@ -28,7 +28,7 @@ func encrypt() {
 	if err != nil {
 		exit(1, "error reading input message: %v", err)
 	}
-	ctxt, err := rsa.EncryptPKCS1v15(rand.Reader, &key.PublicKey, msg)
+	ctxt, err := rsa.EncryptPKCS1v15(rand.Reader, key, msg)
 	if err != nil {
 		exit(1, "error encrypting message: %v", err)
 	}
@@ -46,7 +46,7 @@ func encrypt() {
 }
 
 func decrypt() {
-	key, err := readKey()
+	key, err := privateKey()
 	if err != nil {
 		exit(1, "couldn't setup key: %v", err)
 	}
@@ -70,7 +70,28 @@ func decrypt() {
 	fmt.Printf("%s", msg)
 }
 
-func readKey() (*rsa.PrivateKey, error) {
+func publicKey() (*rsa.PublicKey, error) {
+	if options.publicKey == "" {
+		priv, err := privateKey()
+		if err != nil {
+			return nil, err
+		}
+		return &priv.PublicKey, nil
+	}
+	f, err := os.Open(options.publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read public key from file %s: %v", options.publicKey, err)
+	}
+	defer f.Close()
+	d1 := json.NewDecoder(f)
+	var key rsa.PublicKey
+	if err := d1.Decode(&key); err != nil {
+		return nil, fmt.Errorf("unable to decode key from file %s: %v", options.key, err)
+	}
+	return &key, nil
+}
+
+func privateKey() (*rsa.PrivateKey, error) {
 	f, err := os.Open(options.key)
 	if err != nil {
 		return nil, fmt.Errorf("unable to open private key file at %s: %v", options.key, err)
@@ -86,7 +107,7 @@ func readKey() (*rsa.PrivateKey, error) {
 }
 
 func getPublic() {
-	priv, err := readKey()
+	priv, err := privateKey()
 	if err != nil {
 		exit(1, "unable to read private key file: %v", err)
 	}
