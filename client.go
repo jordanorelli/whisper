@@ -78,7 +78,8 @@ func (c *Client) info(template string, args ...interface{}) {
 }
 
 func (c *Client) trunc() {
-	fmt.Print("\r")
+	fmt.Print("\033[1K") // clear to beginning of the line
+	fmt.Print("\r")      // move to beginning of the line
 }
 
 func (c *Client) err(template string, args ...interface{}) {
@@ -105,21 +106,27 @@ func (c *Client) run() {
 }
 
 func (c *Client) renderLine() {
-	fmt.Printf("\r%s%s", c.prompt, string(c.line))
+	fmt.Printf("\033[1K")                        // clear to beginning of current line
+	fmt.Printf("\r")                             // move to beginning of current line
+	fmt.Printf("%s%s", c.prompt, string(c.line)) // print the line with prompt
 }
 
 func (c *Client) control(r rune) {
 	switch r {
-	case 13: // enter
-		c.enter()
-	case 12: // ctrl+l
-		c.clear()
 	case 3: // ctrl+c
 		c.eof()
 	case 4: // EOF
 		c.eof()
+	case 12: // ctrl+l
+		c.clear()
+	case 13: // enter
+		c.enter()
+	case 21: // ctrl+u
+		c.clearLine()
+	case 127: // backspace
+		c.backspace()
 	default:
-		c.info("control: %v %d %c", r, r, r)
+		c.info("undefined control sequence: %v %d %c", r, r, r)
 	}
 }
 
@@ -130,13 +137,27 @@ func (c *Client) enter() {
 }
 
 func (c *Client) eof() {
-	fmt.Print("\r")
+	fmt.Print("\033[1K") // clear to beginning of current line
+	fmt.Print("\r")      // move to beginning of current line
 	c.done <- 1
 }
 
 func (c *Client) clear() {
 	fmt.Print("\033[2J")   // clear the screen
 	fmt.Print("\033[0;0f") // move to 0, 0
+	c.renderLine()
+}
+
+func (c *Client) clearLine() {
+	c.line = make([]rune, 0, 32)
+	c.renderLine()
+}
+
+func (c *Client) backspace() {
+	if len(c.line) == 0 {
+		return
+	}
+	c.line = c.line[:len(c.line)-1]
 	c.renderLine()
 }
 
