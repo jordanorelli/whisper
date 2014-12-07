@@ -20,13 +20,16 @@ func encodeRequest(conn net.Conn, r request) {
 	if err != nil {
 		exit(1, "unable to encode client request body: %v", err)
 	}
-	e := Envelope{
+	msg := json.RawMessage(b)
+	e := &Envelope{
 		Kind: r.Kind(),
-		Body: b,
+		Body: msg,
 	}
-	if err := json.NewEncoder(conn).Encode(e); err != nil {
+	raw, err := json.Marshal(e)
+	if err != nil {
 		exit(1, "unable to encode client request: %v", err)
 	}
+	conn.Write(raw)
 }
 
 func decodeRequest(conn net.Conn) (request, error) {

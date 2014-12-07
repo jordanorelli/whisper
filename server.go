@@ -1,36 +1,39 @@
 package main
 
 import (
-	// "crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"net"
 )
 
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
+func authConnection(conn net.Conn) error {
+	var raw json.RawMessage
 	d := json.NewDecoder(conn)
-
-	// var nick string
-	// var key rsa.PublicKey
-
-	var env Envelope
-	for {
-		if err := d.Decode(&env); err != nil {
-			error_log.Printf("unable to decode client request: %v", err)
-			return
-		}
-		switch env.Kind {
-		case "auth":
-			var auth Auth
-			if err := json.Unmarshal(env.Body, &auth); err != nil {
-				error_log.Printf("unable to decode auth body: %v", err)
-				break
-			}
-			// nick = auth.Nick
-			// key = auth.Key
-		}
+	if err := d.Decode(&raw); err != nil {
+		return fmt.Errorf("unable to decode client request: %v", err)
 	}
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return fmt.Errorf("man, fuck all this. %v", err)
+	}
+	switch env.Kind {
+	case "auth":
+		var auth Auth
+		if err := json.Unmarshal(env.Body, &auth); err != nil {
+			return fmt.Errorf("unable to decode auth body: %v", err)
+		}
+		info_log.Printf("authenticated user %s", auth.Nick)
+	}
+	return nil
+}
+
+func handleConnection(conn net.Conn) {
+	defer func() {
+		conn.Close()
+		info_log.Printf("connection ended: %v", conn.RemoteAddr())
+	}()
+	info_log.Printf("connection start: %v", conn.RemoteAddr())
+	authConnection(conn)
 }
 
 func serve() {
