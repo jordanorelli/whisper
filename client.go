@@ -86,7 +86,14 @@ func (c *Client) err(template string, args ...interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.trunc()
+	fmt.Print("\033[31m# ")
 	fmt.Printf(template, args...)
+	if !strings.HasSuffix(template, "\n") {
+		fmt.Print("\n")
+	}
+	fmt.Printf("\033[0m")
+	c.renderLine()
 }
 
 func (c *Client) run() {
@@ -102,7 +109,6 @@ func (c *Client) run() {
 	if c.prev != nil {
 		terminal.Restore(0, c.prev)
 	}
-
 }
 
 func (c *Client) renderLine() {
@@ -132,8 +138,21 @@ func (c *Client) control(r rune) {
 
 func (c *Client) enter() {
 	fmt.Print("\n")
+	line := string(c.line)
 	c.line = make([]rune, 0, 32)
-	c.renderLine()
+	c.exec(line)
+}
+
+func (c *Client) exec(line string) {
+	parts := strings.Split(line, " ")
+	if len(parts) == 0 {
+		c.renderLine()
+		return
+	}
+	switch parts[0] {
+	default:
+		c.err("unrecognized client command: %s", parts[0])
+	}
 }
 
 func (c *Client) eof() {
