@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"code.google.com/p/go.crypto/ssh/terminal"
+	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -41,6 +42,7 @@ type Client struct {
 	prev   *terminal.State
 }
 
+// establishes a connection to the server
 func (c *Client) dial() error {
 	addr := fmt.Sprintf("%s:%d", c.host, c.port)
 	c.info("dialing %s", addr)
@@ -55,6 +57,7 @@ func (c *Client) dial() error {
 	return nil
 }
 
+// handles messages received from the current server
 func (c *Client) handleMessages() {
 	messages := make(chan Envelope)
 	errors := make(chan error)
@@ -74,6 +77,7 @@ func (c *Client) handleMessages() {
 	}
 }
 
+// handle a message received from the server
 func (c *Client) handleMessage(m Envelope) error {
 	switch m.Kind {
 	case "meta":
@@ -83,6 +87,7 @@ func (c *Client) handleMessage(m Envelope) error {
 	}
 }
 
+// handles a meta message; that is, a message that is shown to the user
 func (c *Client) handleMeta(body json.RawMessage) error {
 	var meta Meta
 	if err := json.Unmarshal(body, &meta); err != nil {
@@ -169,6 +174,7 @@ func (c *Client) control(r rune) {
 		c.enter()
 	case 21: // ctrl+u
 		c.clearLine()
+	case 27: // up
 	case 127: // backspace
 		c.backspace()
 	default:
@@ -185,13 +191,95 @@ func (c *Client) enter() {
 
 func (c *Client) exec(line string) {
 	parts := strings.Split(line, " ")
-	if len(parts) == 0 {
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
 		c.renderLine()
 		return
 	}
 	switch parts[0] {
+	case "notes/create":
+		c.createNote(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
+	}
+}
+
+func (c *Client) createNote(args []string) {
+	if len(args) < 1 {
+		c.err("yeah you need to specify a title.")
+		return
+	}
+	title := strings.Join(args, " ")
+	c.info("creating new note: %s", title)
+	msg, err := c.readTextBlock()
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+	note, err := c.encryptNote(title, msg)
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+	if err := c.sendRequest(note); err != nil {
+		c.err("error sending note: %v", err)
+	}
+}
+
+func (c *Client) encryptNote(title string, note []rune) (NoteRequest, error) {
+	obj := &NoteData{
+		Title: title,
+		Body:  []byte(string(note)), // lol, nooo, stahp
+	}
+	b, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("unable to marshal note: %v", err)
+	}
+	ctxt, err := rsa.EncryptPKCS1v15(rand.Reader, &c.key.PublicKey, b)
+	if err != nil {
+		return nil, fmt.Errorf("unable to encrypt note: %v", err)
+	}
+	return ctxt, nil
+}
+
+func (c *Client) readTextBlock() ([]rune, error) {
+	// god dammit what have i gotten myself into
+	msg := make([]rune, 0, 400)
+	fmt.Print("\033[1K") // clear to beginning of current line
+	fmt.Print("\r")      // move to beginning of current line
+	fmt.Print("\033[s")  // save the cursor position
+	renderMsg := func() {
+		fmt.Print("\033[u")           // restore cursor position
+		fmt.Print("\033[0J")          // clear to screen end
+		fmt.Printf("%s", string(msg)) // write message out
+	}
+	in := bufio.NewReader(os.Stdin)
+	for {
+		r, _, err := in.ReadRune()
+		switch err {
+		case io.EOF:
+			return msg, nil
+		case nil:
+		default:
+			return nil, fmt.Errorf("error reading textblock: %v", err)
+		}
+		if unicode.IsGraphic(r) {
+			msg = append(msg, r)
+			renderMsg()
+			continue
+		}
+		switch r {
+		case 13: // enter
+			msg = append(msg, '\n')
+			renderMsg()
+		case 127: // backspace
+			if len(msg) == 0 {
+				break
+			}
+			msg = msg[:len(msg)-1]
+			renderMsg()
+		case 4: // ctrl+d
+			return msg, nil
+		}
 	}
 }
 

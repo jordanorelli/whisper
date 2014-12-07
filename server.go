@@ -4,8 +4,12 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"io"
 	"net"
+	"strconv"
+	"strings"
 )
 
 func stream(r io.Reader, c chan Envelope, e chan error, done chan interface{}) {
@@ -29,6 +33,7 @@ type serverConnection struct {
 	conn net.Conn
 	nick string
 	key  rsa.PublicKey
+	db   *leveldb.DB
 }
 
 func (s *serverConnection) sendMeta(template string, args ...interface{}) {
@@ -46,6 +51,8 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 	switch request.Kind {
 	case "auth":
 		return s.handleAuthRequest(request.Body)
+	case "note":
+		return s.handleNoteRequest(request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
@@ -59,7 +66,44 @@ func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
 	s.nick = auth.Nick
 	s.key = auth.Key
 	s.sendMeta("hello, %s", auth.Nick)
+	if err := s.openDB(); err != nil {
+		error_log.Printf("failed to open database: %v", err)
+	}
 	info_log.Printf("authenticated user %s", auth.Nick)
+	return nil
+}
+
+func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
+	r := &util.Range{Start: []byte("notes/")}
+	it := s.db.NewIterator(r, nil)
+	defer it.Release()
+
+	id := 0
+	if it.Last() {
+		k := it.Key()
+		id_s := strings.TrimPrefix(string(k), "notes/")
+		lastId, err := strconv.Atoi(id_s)
+		if err != nil {
+			return fmt.Errorf("error getting note id: %v", err)
+		}
+		id = lastId + 1
+	}
+	key := fmt.Sprintf("notes/%d", id)
+	if err := s.db.Put([]byte(key), body, nil); err != nil {
+		return fmt.Errorf("unable to write note to db: %v", err)
+	}
+	info_log.Printf("stored new note at %s", key)
+	return nil
+}
+
+func (s *serverConnection) openDB() error {
+	path := fmt.Sprintf("./%s.db", s.nick)
+	db, err := leveldb.OpenFile(path, nil)
+	if err != nil {
+		return fmt.Errorf("unable to open db file at %s: %v", path, err)
+	}
+	info_log.Printf("opened database file: %s", path)
+	s.db = db
 	return nil
 }
 
