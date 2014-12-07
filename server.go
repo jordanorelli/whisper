@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,38 +25,58 @@ func stream(r io.Reader, c chan Envelope, e chan error, done chan interface{}) {
 	}
 }
 
-func handleAuthRequest(conn net.Conn, body json.RawMessage) error {
-	var auth Auth
-	if err := json.Unmarshal(body, &auth); err != nil {
-		return fmt.Errorf("bad auth request: %v", err)
-	}
-	info_log.Printf("authenticated user %s", auth.Nick)
-	return nil
+type serverConnection struct {
+	conn net.Conn
+	nick string
+	key  rsa.PublicKey
 }
 
-func handleRequest(conn net.Conn, request Envelope) error {
+func (s *serverConnection) sendMeta(template string, args ...interface{}) {
+	m := Meta(fmt.Sprintf(template, args...))
+	if err := s.sendRequest(m); err != nil {
+		error_log.Printf("error sending message to client: %v", err)
+	}
+}
+
+func (s *serverConnection) sendRequest(r request) error {
+	return writeRequest(s.conn, r)
+}
+
+func (s *serverConnection) handleRequest(request Envelope) error {
 	switch request.Kind {
 	case "auth":
-		return handleAuthRequest(conn, request.Body)
+		return s.handleAuthRequest(request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
 }
 
-func handleConnection(conn net.Conn) {
+func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
+	var auth Auth
+	if err := json.Unmarshal(body, &auth); err != nil {
+		return fmt.Errorf("bad auth request: %v", err)
+	}
+	s.nick = auth.Nick
+	s.key = auth.Key
+	s.sendMeta("hello, %s", auth.Nick)
+	info_log.Printf("authenticated user %s", auth.Nick)
+	return nil
+}
+
+func (s *serverConnection) run() {
 	defer func() {
-		conn.Close()
-		info_log.Printf("connection ended: %v", conn.RemoteAddr())
+		s.conn.Close()
+		info_log.Printf("connection ended: %v", s.conn.RemoteAddr())
 	}()
-	info_log.Printf("connection start: %v", conn.RemoteAddr())
+	info_log.Printf("connection start: %v", s.conn.RemoteAddr())
 	requests := make(chan Envelope)
 	errors := make(chan error)
 	done := make(chan interface{})
-	go stream(conn, requests, errors, done)
+	go stream(s.conn, requests, errors, done)
 	for {
 		select {
 		case request := <-requests:
-			if err := handleRequest(conn, request); err != nil {
+			if err := s.handleRequest(request); err != nil {
 				error_log.Printf("client error: %v", err)
 			}
 		case err := <-errors:
@@ -78,6 +99,9 @@ func serve() {
 			error_log.Printf("error accepting new connection: %v", err)
 			continue
 		}
-		go handleConnection(conn)
+		srvConn := serverConnection{
+			conn: conn,
+		}
+		go srvConn.run()
 	}
 }

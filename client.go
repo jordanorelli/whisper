@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"code.google.com/p/go.crypto/ssh/terminal"
 	"crypto/rsa"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -50,6 +51,44 @@ func (c *Client) dial() error {
 	c.info("connected to %s", addr)
 	c.conn = conn
 	c.prompt = fmt.Sprintf("%s> ", addr)
+	go c.handleMessages()
+	return nil
+}
+
+func (c *Client) handleMessages() {
+	messages := make(chan Envelope)
+	errors := make(chan error)
+	done := make(chan interface{})
+	go stream(c.conn, messages, errors, done)
+	for {
+		select {
+		case message := <-messages:
+			if err := c.handleMessage(message); err != nil {
+				c.err("error handling message from server: %v", err)
+			}
+		case err := <-errors:
+			c.err("server error: %v", err)
+		case <-done:
+			return
+		}
+	}
+}
+
+func (c *Client) handleMessage(m Envelope) error {
+	switch m.Kind {
+	case "meta":
+		return c.handleMeta(m.Body)
+	default:
+		return fmt.Errorf("received message of unsupported type: %v", m.Kind)
+	}
+}
+
+func (c *Client) handleMeta(body json.RawMessage) error {
+	var meta Meta
+	if err := json.Unmarshal(body, &meta); err != nil {
+		return fmt.Errorf("unable to unmarshal meta message: %v", err)
+	}
+	c.info("message from server: %v", meta)
 	return nil
 }
 
