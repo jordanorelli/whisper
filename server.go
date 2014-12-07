@@ -3,28 +3,43 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 )
 
-func authConnection(conn net.Conn) error {
-	var raw json.RawMessage
-	d := json.NewDecoder(conn)
-	if err := d.Decode(&raw); err != nil {
-		return fmt.Errorf("unable to decode client request: %v", err)
-	}
+func stream(r io.Reader, c chan Envelope, e chan error, done chan interface{}) {
+	defer close(done)
+	decoder := json.NewDecoder(r)
 	var env Envelope
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return fmt.Errorf("man, fuck all this. %v", err)
-	}
-	switch env.Kind {
-	case "auth":
-		var auth Auth
-		if err := json.Unmarshal(env.Body, &auth); err != nil {
-			return fmt.Errorf("unable to decode auth body: %v", err)
+	for {
+		err := decoder.Decode(&env)
+		switch err {
+		case io.EOF:
+			return
+		case nil:
+			c <- env
+		default:
+			e <- err
 		}
-		info_log.Printf("authenticated user %s", auth.Nick)
 	}
+}
+
+func handleAuthRequest(conn net.Conn, body json.RawMessage) error {
+	var auth Auth
+	if err := json.Unmarshal(body, &auth); err != nil {
+		return fmt.Errorf("bad auth request: %v", err)
+	}
+	info_log.Printf("authenticated user %s", auth.Nick)
 	return nil
+}
+
+func handleRequest(conn net.Conn, request Envelope) error {
+	switch request.Kind {
+	case "auth":
+		return handleAuthRequest(conn, request.Body)
+	default:
+		return fmt.Errorf("no such request type: %v", request.Kind)
+	}
 }
 
 func handleConnection(conn net.Conn) {
@@ -33,7 +48,22 @@ func handleConnection(conn net.Conn) {
 		info_log.Printf("connection ended: %v", conn.RemoteAddr())
 	}()
 	info_log.Printf("connection start: %v", conn.RemoteAddr())
-	authConnection(conn)
+	requests := make(chan Envelope)
+	errors := make(chan error)
+	done := make(chan interface{})
+	go stream(conn, requests, errors, done)
+	for {
+		select {
+		case request := <-requests:
+			if err := handleRequest(conn, request); err != nil {
+				error_log.Printf("client error: %v", err)
+			}
+		case err := <-errors:
+			error_log.Printf("connection error: %v", err)
+		case <-done:
+			return
+		}
+	}
 }
 
 func serve() {

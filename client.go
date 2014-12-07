@@ -98,6 +98,7 @@ func (c *Client) err(template string, args ...interface{}) {
 
 func (c *Client) run() {
 	go c.term()
+
 	if err := c.dial(); err != nil {
 		exit(1, "%v", err)
 	}
