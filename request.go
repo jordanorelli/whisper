@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -15,10 +16,10 @@ type request interface {
 	Kind() string
 }
 
-func encodeRequest(conn net.Conn, r request) {
+func writeRequest(w io.Writer, r request) error {
 	b, err := json.Marshal(r)
 	if err != nil {
-		exit(1, "unable to encode client request body: %v", err)
+		return fmt.Errorf("unable to marshal request: %v", err)
 	}
 	msg := json.RawMessage(b)
 	e := &Envelope{
@@ -27,9 +28,12 @@ func encodeRequest(conn net.Conn, r request) {
 	}
 	raw, err := json.Marshal(e)
 	if err != nil {
-		exit(1, "unable to encode client request: %v", err)
+		return fmt.Errorf("unable to marshal request envelope: %v", err)
 	}
-	conn.Write(raw)
+	if _, err := w.Write(raw); err != nil {
+		return fmt.Errorf("unable to write request: %v", err)
+	}
+	return nil
 }
 
 func decodeRequest(conn net.Conn) (request, error) {
