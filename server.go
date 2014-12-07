@@ -41,6 +41,7 @@ func serve() {
 	if err != nil {
 		exit(1, "couldn't open tcp port for listening: %v", err)
 	}
+	info_log.Printf("server listening: %s:%d", options.host, options.port)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
