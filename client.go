@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -82,6 +83,8 @@ func (c *Client) handleMessage(m Envelope) error {
 	switch m.Kind {
 	case "meta":
 		return c.handleMeta(m.Body)
+	case "note":
+		return c.handleNote(m.Body)
 	default:
 		return fmt.Errorf("received message of unsupported type: %v", m.Kind)
 	}
@@ -94,6 +97,24 @@ func (c *Client) handleMeta(body json.RawMessage) error {
 		return fmt.Errorf("unable to unmarshal meta message: %v", err)
 	}
 	c.info("message from server: %v", meta)
+	return nil
+}
+
+func (c *Client) handleNote(body json.RawMessage) error {
+	var ctxt []byte
+	if err := json.Unmarshal(body, &ctxt); err != nil {
+		return fmt.Errorf("unable to read note response: %v", err)
+	}
+	ptxt, err := rsa.DecryptPKCS1v15(rand.Reader, c.key, ctxt)
+	if err != nil {
+		return fmt.Errorf("unable to decrypt note response: %v", err)
+	}
+	var note NoteData
+	if err := json.Unmarshal(ptxt, &note); err != nil {
+		return fmt.Errorf("unable to unmarshal note response: %v", err)
+	}
+	c.info("title: %s", note.Title)
+	c.info("body: %s", string(note.Body))
 	return nil
 }
 
@@ -198,6 +219,8 @@ func (c *Client) exec(line string) {
 	switch parts[0] {
 	case "notes/create":
 		c.createNote(parts[1:])
+	case "notes/get":
+		c.getNote(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
 	}
@@ -222,6 +245,22 @@ func (c *Client) createNote(args []string) {
 	}
 	if err := c.sendRequest(note); err != nil {
 		c.err("error sending note: %v", err)
+	}
+}
+
+func (c *Client) getNote(args []string) {
+	if len(args) != 1 {
+		c.err("ok notes/get takes exactly 1 argument")
+		return
+	}
+	id, err := strconv.Atoi(args[0])
+	if err != nil {
+		c.err("that doesn't look like an int: %v", err)
+		return
+	}
+	if err := c.sendRequest(GetNoteRequest(id)); err != nil {
+		c.err("couldn't request note: %v", err)
+		return
 	}
 }
 
