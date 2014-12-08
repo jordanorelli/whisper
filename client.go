@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"code.google.com/p/go.crypto/ssh/terminal"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -101,20 +103,38 @@ func (c *Client) handleMeta(body json.RawMessage) error {
 }
 
 func (c *Client) handleNote(body json.RawMessage) error {
-	var ctxt []byte
-	if err := json.Unmarshal(body, &ctxt); err != nil {
-		return fmt.Errorf("unable to read note response: %v", err)
+	c.info("unmarshaling note...")
+	var enote EncryptedNote
+	if err := json.Unmarshal(body, &enote); err != nil {
+		return fmt.Errorf("unable to unmarshal encrypted note: %v", err)
 	}
-	ptxt, err := rsa.DecryptPKCS1v15(rand.Reader, c.key, ctxt)
+
+	c.info("aes key ciphertext: %x", enote.Key)
+	key, err := rsa.DecryptPKCS1v15(rand.Reader, c.key, enote.Key)
 	if err != nil {
-		return fmt.Errorf("unable to decrypt note response: %v", err)
+		return fmt.Errorf("unable to decrypt aes key from note: %v", err)
 	}
-	var note NoteData
+	c.info("aes key: %x", key)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return fmt.Errorf("unable to create aes cipher: %v", err)
+	}
+
+	iv := enote.Body[:aes.BlockSize]
+	c.info("aes iv: %x", iv)
+
+	ptxt := make([]byte, len(enote.Body)-aes.BlockSize)
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(ptxt, enote.Body[aes.BlockSize:])
+
+	c.info("ptxt: %s", ptxt)
+	var note Note
 	if err := json.Unmarshal(ptxt, &note); err != nil {
-		return fmt.Errorf("unable to unmarshal note response: %v", err)
+		return fmt.Errorf("unable to unmarshal ptxt note: %v", err)
 	}
 	c.info("title: %s", note.Title)
-	c.info("body: %s", string(note.Body))
+	c.info("body: %s", note.Body)
 	return nil
 }
 
@@ -125,7 +145,19 @@ func (c *Client) handshake() error {
 }
 
 func (c *Client) sendRequest(r request) error {
-	return writeRequest(c.conn, r)
+	e, err := wrapRequest(r)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	c.info("sending json request: %s", b)
+	if _, err := c.conn.Write(b); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *Client) info(template string, args ...interface{}) {
@@ -264,20 +296,64 @@ func (c *Client) getNote(args []string) {
 	}
 }
 
-func (c *Client) encryptNote(title string, note []rune) (NoteRequest, error) {
-	obj := &NoteData{
+func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, error) {
+	c.info("encrypting note...")
+	note := &Note{
 		Title: title,
-		Body:  []byte(string(note)), // lol, nooo, stahp
+		Body:  []byte(string(message)),
 	}
-	b, err := json.Marshal(obj)
+
+	c.info("marshalling into json")
+	ptxt, err := json.Marshal(note)
 	if err != nil {
-		return nil, fmt.Errorf("unable to marshal note: %v", err)
+		return nil, fmt.Errorf("couldn't marshal note to json: %v", err)
 	}
-	ctxt, err := rsa.EncryptPKCS1v15(rand.Reader, &c.key.PublicKey, b)
+	c.info("json text: %s", string(ptxt))
+
+	if len(ptxt)%aes.BlockSize != 0 {
+		pad := aes.BlockSize - len(ptxt)%aes.BlockSize
+		// this is shitty.  There's a better way to do this, right?
+		for i := 0; i < pad; i++ {
+			ptxt = append(ptxt, ' ')
+		}
+	}
+
+	c.info("generating random aes key")
+	key, err := randslice(aes.BlockSize)
 	if err != nil {
-		return nil, fmt.Errorf("unable to encrypt note: %v", err)
+		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes key bytes: %v", err)
 	}
-	return ctxt, nil
+	c.info("aes key: %x", key)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes cipher: %v", err)
+	}
+
+	c.info("generating aes iv")
+	ctxt := make([]byte, aes.BlockSize+len(ptxt))
+	iv := ctxt[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes iv: %v", err)
+	}
+	c.info("aes iv: %x", iv)
+
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ctxt[aes.BlockSize:], ptxt)
+
+	c.info("aes ciphertext: %x", ctxt)
+	c.info("rsa encrypting aes key...")
+
+	ckey, err := rsa.EncryptPKCS1v15(rand.Reader, &c.key.PublicKey, key)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't encrypt note: failed to rsa encrypt aes key: %v", err)
+	}
+	c.info("ckey: %x", ckey)
+
+	return &EncryptedNote{
+		Key:  ckey,
+		Body: ctxt,
+	}, nil
 }
 
 func (c *Client) readTextBlock() ([]rune, error) {

@@ -80,11 +80,6 @@ func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
 	it := s.db.NewIterator(r, nil)
 	defer it.Release()
 
-	var ctxt []byte
-	if err := json.Unmarshal(body, &ctxt); err != nil {
-		return fmt.Errorf("unable to unmarshal ciphertext: %v", err)
-	}
-
 	id := 0
 	if it.Last() {
 		k := it.Key()
@@ -96,7 +91,7 @@ func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
 		id = lastId + 1
 	}
 	key := fmt.Sprintf("notes/%d", id)
-	if err := s.db.Put([]byte(key), ctxt, nil); err != nil {
+	if err := s.db.Put([]byte(key), body, nil); err != nil {
 		return fmt.Errorf("unable to write note to db: %v", err)
 	}
 	info_log.Printf("stored new note at %s", key)
@@ -113,7 +108,11 @@ func (s *serverConnection) handleGetNoteRequest(body json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("couldn't retrieve note: %v", err)
 	}
-	if err := s.sendRequest(NoteRequest(b)); err != nil {
+	raw, err := json.Marshal(&Envelope{Kind: "note", Body: b})
+	if err != nil {
+		return fmt.Errorf("couldn't send note back to client: %v", err)
+	}
+	if _, err := s.conn.Write(raw); err != nil {
 		return fmt.Errorf("couldn't send note back to client: %v", err)
 	}
 	return nil

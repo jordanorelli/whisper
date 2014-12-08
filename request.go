@@ -16,6 +16,17 @@ type request interface {
 	Kind() string
 }
 
+func wrapRequest(r request) (*Envelope, error) {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return nil, fmt.Errorf("unable to wrap request: %v", err)
+	}
+	return &Envelope{
+		Kind: r.Kind(),
+		Body: b,
+	}, nil
+}
+
 func writeRequest(w io.Writer, r request) error {
 	b, err := json.Marshal(r)
 	if err != nil {
