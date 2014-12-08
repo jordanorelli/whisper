@@ -16,8 +16,9 @@ type Note struct {
 }
 
 type EncryptedNote struct {
-	Key  []byte
-	Body []byte
+	Key   []byte
+	Title []byte
+	Body  []byte
 }
 
 func (n EncryptedNote) Kind() string {
@@ -31,4 +32,15 @@ func randslice(n int) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+type ListNotes struct {
+	N int
+}
+
+func (l ListNotes) Kind() string {
+	return "list-notes"
+}
+
+type ListNotesResponse struct {
 }

@@ -102,10 +102,10 @@ func (c *Client) handleMeta(body json.RawMessage) error {
 	return nil
 }
 
-func (c *Client) handleNote(body json.RawMessage) error {
+func (c *Client) handleNote(raw json.RawMessage) error {
 	c.info("unmarshaling note...")
 	var enote EncryptedNote
-	if err := json.Unmarshal(body, &enote); err != nil {
+	if err := json.Unmarshal(raw, &enote); err != nil {
 		return fmt.Errorf("unable to unmarshal encrypted note: %v", err)
 	}
 
@@ -116,25 +116,20 @@ func (c *Client) handleNote(body json.RawMessage) error {
 	}
 	c.info("aes key: %x", key)
 
-	block, err := aes.NewCipher(key)
+	title, err := c.aesDecrypt(key, enote.Title)
 	if err != nil {
-		return fmt.Errorf("unable to create aes cipher: %v", err)
+		return fmt.Errorf("unable to decrypt note title: %v", err)
 	}
 
-	iv := enote.Body[:aes.BlockSize]
-	c.info("aes iv: %x", iv)
-
-	ptxt := make([]byte, len(enote.Body)-aes.BlockSize)
-	mode := cipher.NewCBCDecrypter(block, iv)
-	mode.CryptBlocks(ptxt, enote.Body[aes.BlockSize:])
-
-	c.info("ptxt: %s", ptxt)
-	var note Note
-	if err := json.Unmarshal(ptxt, &note); err != nil {
-		return fmt.Errorf("unable to unmarshal ptxt note: %v", err)
+	body, err := c.aesDecrypt(key, enote.Body)
+	if err != nil {
+		return fmt.Errorf("unable to decrypt note body: %v", err)
 	}
-	c.info("title: %s", note.Title)
-	c.info("body: %s", note.Body)
+
+	fmt.Print("\033[37m")
+	fmt.Printf("\r%s\n", title)
+	fmt.Printf("\033[0m") // unset color choice
+	fmt.Printf("%s\n", body)
 	return nil
 }
 
@@ -184,12 +179,12 @@ func (c *Client) err(template string, args ...interface{}) {
 	defer c.mu.Unlock()
 
 	c.trunc()
-	fmt.Print("\033[31m# ")
+	fmt.Print("\033[31m# ") // set color to red
 	fmt.Printf(template, args...)
 	if !strings.HasSuffix(template, "\n") {
 		fmt.Print("\n")
 	}
-	fmt.Printf("\033[0m")
+	fmt.Printf("\033[0m") // unset color choice
 	c.renderLine()
 }
 
@@ -253,6 +248,8 @@ func (c *Client) exec(line string) {
 		c.createNote(parts[1:])
 	case "notes/get":
 		c.getNote(parts[1:])
+	case "notes/list":
+		c.listNotes(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
 	}
@@ -296,6 +293,11 @@ func (c *Client) getNote(args []string) {
 	}
 }
 
+func (c *Client) listNotes(args []string) {
+	r := &ListNotes{N: 10}
+	c.sendRequest(r)
+}
+
 func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, error) {
 	c.info("encrypting note...")
 	note := &Note{
@@ -303,46 +305,24 @@ func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, erro
 		Body:  []byte(string(message)),
 	}
 
-	c.info("marshalling into json")
-	ptxt, err := json.Marshal(note)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't marshal note to json: %v", err)
-	}
-	c.info("json text: %s", string(ptxt))
-
-	if len(ptxt)%aes.BlockSize != 0 {
-		pad := aes.BlockSize - len(ptxt)%aes.BlockSize
-		// this is shitty.  There's a better way to do this, right?
-		for i := 0; i < pad; i++ {
-			ptxt = append(ptxt, ' ')
-		}
-	}
-
 	c.info("generating random aes key")
-	key, err := randslice(aes.BlockSize)
+	key, err := c.aesKey()
 	if err != nil {
 		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes key bytes: %v", err)
 	}
 	c.info("aes key: %x", key)
 
-	block, err := aes.NewCipher(key)
+	ctitle, err := c.aesEncrypt(key, []byte(note.Title))
 	if err != nil {
-		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes cipher: %v", err)
+		return nil, fmt.Errorf("couldn't encrypt note: failed to aes encrypt title: %v", err)
 	}
+	c.info("aes ctitle: %s", ctitle)
 
-	c.info("generating aes iv")
-	ctxt := make([]byte, aes.BlockSize+len(ptxt))
-	iv := ctxt[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes iv: %v", err)
+	cbody, err := c.aesEncrypt(key, note.Body)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't encrypt note: failed to aes encrypt body: %v", err)
 	}
-	c.info("aes iv: %x", iv)
-
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ctxt[aes.BlockSize:], ptxt)
-
-	c.info("aes ciphertext: %x", ctxt)
-	c.info("rsa encrypting aes key...")
+	c.info("aes cbody: %s", cbody)
 
 	ckey, err := rsa.EncryptPKCS1v15(rand.Reader, &c.key.PublicKey, key)
 	if err != nil {
@@ -351,8 +331,9 @@ func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, erro
 	c.info("ckey: %x", ckey)
 
 	return &EncryptedNote{
-		Key:  ckey,
-		Body: ctxt,
+		Key:   ckey,
+		Title: ctitle,
+		Body:  cbody,
 	}, nil
 }
 
@@ -449,6 +430,56 @@ func (c *Client) term() {
 			c.control(r)
 		}
 	}
+}
+
+func (c *Client) aesKey() ([]byte, error) {
+	return randslice(aes.BlockSize)
+}
+
+func (c *Client) aesDecrypt(key []byte, ctxt []byte) ([]byte, error) {
+	c.info("aes decrypting...")
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("unable to create aes cipher: %v", err)
+	}
+	iv := ctxt[:aes.BlockSize]
+	c.info("aes iv: %x", iv)
+
+	ptxt := make([]byte, len(ctxt)-aes.BlockSize)
+	mode := cipher.NewCBCDecrypter(block, iv)
+	mode.CryptBlocks(ptxt, ctxt[aes.BlockSize:])
+	return ptxt, nil
+}
+
+func (c *Client) aesEncrypt(key []byte, ptxt []byte) ([]byte, error) {
+	c.info("aes encrypting...")
+	if len(ptxt)%aes.BlockSize != 0 {
+		pad := aes.BlockSize - len(ptxt)%aes.BlockSize
+		c.info("padding by %d bytes", pad)
+		// this is shitty.  There's a better way to do this, right?
+		// this is also not reversible so I have to do this better.
+		for i := 0; i < pad; i++ {
+			ptxt = append(ptxt, ' ')
+		}
+	}
+
+	c.info("new block cipher")
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes cipher: %v", err)
+	}
+
+	ctxt := make([]byte, aes.BlockSize+len(ptxt))
+	iv := ctxt[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, fmt.Errorf("couldn't encrypt note: failed to make aes iv: %v", err)
+	}
+	c.info("aes iv: %x", iv)
+
+	mode := cipher.NewCBCEncrypter(block, iv)
+	mode.CryptBlocks(ctxt[aes.BlockSize:], ptxt)
+	c.info("aes encryption done")
+	return ctxt, nil
 }
 
 func connect() {
