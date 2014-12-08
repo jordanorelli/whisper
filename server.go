@@ -109,7 +109,7 @@ func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
 }
 
 func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
-	r := &util.Range{Start: []byte("notes/")}
+	r := util.BytesPrefix([]byte("notes/"))
 	it := s.db.NewIterator(r, nil)
 	defer it.Release()
 
