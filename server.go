@@ -71,6 +71,39 @@ func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
 	if err := s.openDB(); err != nil {
 		error_log.Printf("failed to open database: %v", err)
 	}
+	b, err := s.db.Get([]byte("public_key"), nil)
+	switch err {
+	case leveldb.ErrNotFound:
+		keybytes, err := json.Marshal(auth.Key)
+		if err != nil {
+			error_log.Printf("motherfucking bullshit fuck shit fuck: %v", err)
+			break
+		}
+		if err := s.db.Put([]byte("public_key"), keybytes, nil); err != nil {
+			error_log.Printf("man fuck all this stupid key bullshit i hate it: %v", err)
+			break
+		}
+	case nil:
+		var key rsa.PublicKey
+		if err := json.Unmarshal(b, &key); err != nil {
+			error_log.Printf("ok no i can't even do this key unmarshal shit: %v", err)
+			break
+		}
+		if auth.Key.E != key.E {
+			error_log.Printf("that's totally the wrong key!  hang up.  just hang up.")
+			// todo: make there be a way to hang up lol
+			break
+		}
+		if auth.Key.N.Cmp(key.N) != 0 {
+			error_log.Printf("that's totally the wrong key!  hang up.  just hang up.")
+			// todo: make there be a way to hang up lol
+			break
+		}
+		info_log.Printf("ok the key checks out.")
+	default:
+		error_log.Printf("unable to get public key for user %s: %v", auth.Nick, err)
+	}
+	info_log.Printf("%s", b)
 	info_log.Printf("authenticated user %s", auth.Nick)
 	return nil
 }
