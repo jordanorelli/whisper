@@ -115,3 +115,9 @@ func getPublic() {
 		exit(1, "unable to marshal key: %v", err)
 	}
 }
+
+type KeyRequest string
+
+func (k KeyRequest) Kind() string {
+	return "key"
+}

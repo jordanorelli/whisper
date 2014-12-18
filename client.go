@@ -87,6 +87,8 @@ func (c *Client) handleMessage(m Envelope) error {
 		return c.handleMeta(m.Body)
 	case "note":
 		return c.handleNote(m.Body)
+	case "list-notes":
+		return c.handleListNotes(m.Body)
 	default:
 		return fmt.Errorf("received message of unsupported type: %v", m.Kind)
 	}
@@ -130,6 +132,38 @@ func (c *Client) handleNote(raw json.RawMessage) error {
 	fmt.Printf("\r%s\n", title)
 	fmt.Printf("\033[0m") // unset color choice
 	fmt.Printf("%s\n", body)
+	return nil
+}
+
+func (c *Client) handleListNotes(raw json.RawMessage) error {
+	var notes ListNotesResponse
+	if err := json.Unmarshal(raw, &notes); err != nil {
+		return fmt.Errorf("unable to unmarshal listnotes response: %v", err)
+	}
+
+	writeNoteTitle := func(id int, title string) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.trunc()
+		fmt.Printf("%d\t%s\n", id, title)
+		c.renderLine()
+	}
+
+	for _, note := range notes {
+		key, err := rsa.DecryptPKCS1v15(rand.Reader, c.key, note.Key)
+		if err != nil {
+			c.err("unable to decrypt note key: %v", err)
+			continue
+		}
+
+		title, err := c.aesDecrypt(key, note.Title)
+		if err != nil {
+			c.err("unable to decrype not title: %v", err)
+			continue
+		}
+
+		writeNoteTitle(note.Id, string(title))
+	}
 	return nil
 }
 

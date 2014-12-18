@@ -2,7 +2,18 @@ package main
 
 import (
 	"crypto/rand"
+	"github.com/jordanorelli/lexnum"
 )
+
+var numEncoder = lexnum.NewEncoder('=', '-')
+
+func encodeInt(n int) string {
+	return numEncoder.EncodeInt(n)
+}
+
+func decodeInt(s string) (int, error) {
+	return numEncoder.DecodeInt(s)
+}
 
 type GetNoteRequest int
 
@@ -42,5 +53,14 @@ func (l ListNotes) Kind() string {
 	return "list-notes"
 }
 
-type ListNotesResponse struct {
+type ListNotesResponseItem struct {
+	Id    int
+	Key   []byte
+	Title []byte
+}
+
+type ListNotesResponse []ListNotesResponseItem
+
+func (l ListNotesResponse) Kind() string {
+	return "list-notes"
 }

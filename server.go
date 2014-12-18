@@ -8,7 +8,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 )
 
@@ -55,6 +54,8 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 		return s.handleNoteRequest(request.Body)
 	case "get-note":
 		return s.handleGetNoteRequest(request.Body)
+	case "list-notes":
+		return s.handleListNotesRequest(request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
@@ -117,13 +118,13 @@ func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
 	if it.Last() {
 		k := it.Key()
 		id_s := strings.TrimPrefix(string(k), "notes/")
-		lastId, err := strconv.Atoi(id_s)
+		lastId, err := decodeInt(id_s)
 		if err != nil {
 			return fmt.Errorf("error getting note id: %v", err)
 		}
 		id = lastId + 1
 	}
-	key := fmt.Sprintf("notes/%d", id)
+	key := fmt.Sprintf("notes/%s", encodeInt(id))
 	if err := s.db.Put([]byte(key), body, nil); err != nil {
 		return fmt.Errorf("unable to write note to db: %v", err)
 	}
@@ -136,7 +137,7 @@ func (s *serverConnection) handleGetNoteRequest(body json.RawMessage) error {
 	if err := json.Unmarshal(body, &req); err != nil {
 		return fmt.Errorf("bad getnote request: %v", err)
 	}
-	key := fmt.Sprintf("notes/%d", req)
+	key := fmt.Sprintf("notes/%s", encodeInt(int(req)))
 	b, err := s.db.Get([]byte(key), nil)
 	if err != nil {
 		return fmt.Errorf("couldn't retrieve note: %v", err)
@@ -149,6 +150,47 @@ func (s *serverConnection) handleGetNoteRequest(body json.RawMessage) error {
 		return fmt.Errorf("couldn't send note back to client: %v", err)
 	}
 	return nil
+}
+
+func (s *serverConnection) handleListNotesRequest(body json.RawMessage) error {
+	r := util.BytesPrefix([]byte("notes/"))
+
+	it := s.db.NewIterator(r, nil)
+	defer it.Release()
+
+	notes := make(ListNotesResponse, 0, 10)
+	it.Last()
+	for i := 0; it.Valid() && i < 10; i++ {
+		key, val := it.Key(), it.Value()
+
+		info_log.Printf("note %d has key %s", i, string(key))
+		id_s := strings.TrimPrefix(string(key), "notes/")
+		info_log.Printf("note id_s: %s", id_s)
+		id, err := decodeInt(id_s)
+		if err != nil {
+			error_log.Printf("unable to parse note key %s: %v", id_s, err)
+			it.Prev()
+			continue
+		}
+		info_log.Printf("note key: %s id: %d\n", key, id)
+
+		var note EncryptedNote
+		if err := json.Unmarshal(val, &note); err != nil {
+			error_log.Printf("unable to unmarshal encrypted note: %v", err)
+			it.Prev()
+			continue
+		}
+		notes = append(notes, ListNotesResponseItem{
+			Id:    id,
+			Key:   note.Key,
+			Title: note.Title,
+		})
+		it.Prev()
+	}
+	if err := it.Error(); err != nil {
+		return fmt.Errorf("error reading listnotes from db: %v", err)
+	}
+	return s.sendRequest(notes)
 }
 
 func (s *serverConnection) openDB() error {
