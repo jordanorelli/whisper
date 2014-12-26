@@ -121,3 +121,16 @@ type KeyRequest string
 func (k KeyRequest) Kind() string {
 	return "key"
 }
+
+func (k KeyRequest) Nick() string {
+	return string(k)
+}
+
+type KeyResponse struct {
+	Nick string
+	Key  rsa.PublicKey
+}
+
+func (k KeyResponse) Kind() string {
+	return "key-response"
+}

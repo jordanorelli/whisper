@@ -33,16 +33,17 @@ type ReadWriter struct {
 }
 
 type Client struct {
-	key    *rsa.PrivateKey
-	host   string
-	port   int
-	nick   string
-	conn   net.Conn
-	done   chan interface{}
-	mu     sync.Mutex
-	prompt string
-	line   []rune
-	prev   *terminal.State
+	key      *rsa.PrivateKey
+	host     string
+	port     int
+	nick     string
+	conn     net.Conn
+	done     chan interface{}
+	mu       sync.Mutex
+	prompt   string
+	line     []rune
+	prev     *terminal.State
+	keyStore map[string]rsa.PublicKey
 }
 
 // establishes a connection to the server
@@ -89,6 +90,8 @@ func (c *Client) handleMessage(m Envelope) error {
 		return c.handleNote(m.Body)
 	case "list-notes":
 		return c.handleListNotes(m.Body)
+	case "key-response":
+		return c.handleKeyResponse(m.Body)
 	default:
 		return fmt.Errorf("received message of unsupported type: %v", m.Kind)
 	}
@@ -284,10 +287,16 @@ func (c *Client) exec(line string) {
 		c.getNote(parts[1:])
 	case "notes/list":
 		c.listNotes(parts[1:])
+	case "keys/get":
+		c.getKey(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
 	}
 }
+
+// ------------------------------------------------------------------------------
+// note functions
+// ------------------------------------------------------------------------------
 
 func (c *Client) createNote(args []string) {
 	if len(args) < 1 {
@@ -369,6 +378,41 @@ func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, erro
 		Title: ctitle,
 		Body:  cbody,
 	}, nil
+}
+
+// ------------------------------------------------------------------------------
+// key functions
+// ------------------------------------------------------------------------------
+
+func (c *Client) getKey(args []string) {
+	if len(args) != 1 {
+		c.err("keys/get takes exactly one arg")
+		return
+	}
+	req := KeyRequest(args[0])
+	if err := c.sendRequest(req); err != nil {
+		c.err("couldn't send key request: %v", err)
+		return
+	}
+}
+
+func (c *Client) saveKey(nick string, key rsa.PublicKey) {
+	if c.keyStore == nil {
+		c.keyStore = make(map[string]rsa.PublicKey, 8)
+	}
+	c.keyStore[nick] = key
+}
+
+func (c *Client) handleKeyResponse(body json.RawMessage) error {
+	c.info(string(body))
+	var res KeyResponse
+	if err := json.Unmarshal(body, &res); err != nil {
+		c.err(err.Error())
+		return err
+	}
+	c.info("%v", res)
+	c.saveKey(res.Nick, res.Key)
+	return nil
 }
 
 func (c *Client) readTextBlock() ([]rune, error) {

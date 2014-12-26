@@ -32,7 +32,7 @@ type serverConnection struct {
 	conn net.Conn
 	nick string
 	key  rsa.PublicKey
-	db   *leveldb.DB
+	db   *userdb
 }
 
 func (s *serverConnection) sendMeta(template string, args ...interface{}) {
@@ -56,6 +56,8 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 		return s.handleGetNoteRequest(request.Body)
 	case "list-notes":
 		return s.handleListNotesRequest(request.Body)
+	case "key":
+		return s.handleKeyRequest(request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
@@ -84,6 +86,7 @@ func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
 			error_log.Printf("man fuck all this stupid key bullshit i hate it: %v", err)
 			break
 		}
+		info_log.Printf("saved key for user %s", auth.Nick)
 	case nil:
 		var key rsa.PublicKey
 		if err := json.Unmarshal(b, &key); err != nil {
@@ -193,13 +196,29 @@ func (s *serverConnection) handleListNotesRequest(body json.RawMessage) error {
 	return s.sendRequest(notes)
 }
 
-func (s *serverConnection) openDB() error {
-	path := fmt.Sprintf("./%s.db", s.nick)
-	db, err := leveldb.OpenFile(path, nil)
-	if err != nil {
-		return fmt.Errorf("unable to open db file at %s: %v", path, err)
+func (s *serverConnection) handleKeyRequest(body json.RawMessage) error {
+	var req KeyRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		error_log.Printf("unable to read key request: %v", err)
+		return err
 	}
-	info_log.Printf("opened database file: %s", path)
+	info_log.Printf("get key: %v", req.Nick())
+	key, err := getUserKey(req.Nick())
+	if err != nil {
+		return err
+	}
+	res := KeyResponse{
+		Nick: req.Nick(),
+		Key:  *key,
+	}
+	return s.sendRequest(res)
+}
+
+func (s *serverConnection) openDB() error {
+	db, err := getUserDB(s.nick)
+	if err != nil {
+		return err
+	}
 	s.db = db
 	return nil
 }
