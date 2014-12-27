@@ -35,42 +35,36 @@ type serverConnection struct {
 	db   *userdb
 }
 
-func (s *serverConnection) sendMeta(template string, args ...interface{}) {
-	m := Meta(fmt.Sprintf(template, args...))
-	if err := s.sendRequest(m); err != nil {
-		error_log.Printf("error sending message to client: %v", err)
-	}
-}
-
-func (s *serverConnection) sendRequest(r request) error {
-	return writeRequest(s.conn, r)
+func (s *serverConnection) sendResponse(id int, r request) error {
+	return writeRequest(s.conn, id, r)
 }
 
 func (s *serverConnection) handleRequest(request Envelope) error {
+	info_log.Printf("handle request #%d", request.Id)
 	switch request.Kind {
 	case "auth":
-		return s.handleAuthRequest(request.Body)
+		return s.handleAuthRequest(request.Id, request.Body)
 	case "note":
-		return s.handleNoteRequest(request.Body)
+		return s.handleNoteRequest(request.Id, request.Body)
 	case "get-note":
-		return s.handleGetNoteRequest(request.Body)
+		return s.handleGetNoteRequest(request.Id, request.Body)
 	case "list-notes":
-		return s.handleListNotesRequest(request.Body)
+		return s.handleListNotesRequest(request.Id, request.Body)
 	case "key":
-		return s.handleKeyRequest(request.Body)
+		return s.handleKeyRequest(request.Id, request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
 }
 
-func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
+func (s *serverConnection) handleAuthRequest(requestId int, body json.RawMessage) error {
 	var auth Auth
 	if err := json.Unmarshal(body, &auth); err != nil {
 		return fmt.Errorf("bad auth request: %v", err)
 	}
 	s.nick = auth.Nick
 	s.key = auth.Key
-	s.sendMeta("hello, %s", auth.Nick)
+	// s.sendMeta("hello, %s", auth.Nick)
 	if err := s.openDB(); err != nil {
 		error_log.Printf("failed to open database: %v", err)
 	}
@@ -112,7 +106,7 @@ func (s *serverConnection) handleAuthRequest(body json.RawMessage) error {
 	return nil
 }
 
-func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
+func (s *serverConnection) handleNoteRequest(requestId int, body json.RawMessage) error {
 	r := util.BytesPrefix([]byte("notes/"))
 	it := s.db.NewIterator(r, nil)
 	defer it.Release()
@@ -135,7 +129,7 @@ func (s *serverConnection) handleNoteRequest(body json.RawMessage) error {
 	return nil
 }
 
-func (s *serverConnection) handleGetNoteRequest(body json.RawMessage) error {
+func (s *serverConnection) handleGetNoteRequest(requestId int, body json.RawMessage) error {
 	var req GetNoteRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return fmt.Errorf("bad getnote request: %v", err)
@@ -155,7 +149,7 @@ func (s *serverConnection) handleGetNoteRequest(body json.RawMessage) error {
 	return nil
 }
 
-func (s *serverConnection) handleListNotesRequest(body json.RawMessage) error {
+func (s *serverConnection) handleListNotesRequest(requestId int, body json.RawMessage) error {
 	r := util.BytesPrefix([]byte("notes/"))
 
 	it := s.db.NewIterator(r, nil)
@@ -193,10 +187,10 @@ func (s *serverConnection) handleListNotesRequest(body json.RawMessage) error {
 	if err := it.Error(); err != nil {
 		return fmt.Errorf("error reading listnotes from db: %v", err)
 	}
-	return s.sendRequest(notes)
+	return s.sendResponse(requestId, notes)
 }
 
-func (s *serverConnection) handleKeyRequest(body json.RawMessage) error {
+func (s *serverConnection) handleKeyRequest(requestId int, body json.RawMessage) error {
 	var req KeyRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		error_log.Printf("unable to read key request: %v", err)
@@ -211,7 +205,7 @@ func (s *serverConnection) handleKeyRequest(body json.RawMessage) error {
 		Nick: req.Nick(),
 		Key:  *key,
 	}
-	return s.sendRequest(res)
+	return s.sendResponse(requestId, res)
 }
 
 func (s *serverConnection) openDB() error {

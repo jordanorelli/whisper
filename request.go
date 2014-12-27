@@ -8,6 +8,7 @@ import (
 )
 
 type Envelope struct {
+	Id   int
 	Kind string
 	Body json.RawMessage
 }
@@ -16,24 +17,26 @@ type request interface {
 	Kind() string
 }
 
-func wrapRequest(r request) (*Envelope, error) {
+func wrapRequest(id int, r request) (*Envelope, error) {
 	b, err := json.Marshal(r)
 	if err != nil {
 		return nil, fmt.Errorf("unable to wrap request: %v", err)
 	}
 	return &Envelope{
+		Id:   id,
 		Kind: r.Kind(),
 		Body: b,
 	}, nil
 }
 
-func writeRequest(w io.Writer, r request) error {
+func writeRequest(w io.Writer, id int, r request) error {
 	b, err := json.Marshal(r)
 	if err != nil {
 		return fmt.Errorf("unable to marshal request: %v", err)
 	}
 	msg := json.RawMessage(b)
 	e := &Envelope{
+		Id:   id,
 		Kind: r.Kind(),
 		Body: msg,
 	}

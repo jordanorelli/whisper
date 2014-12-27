@@ -33,17 +33,19 @@ type ReadWriter struct {
 }
 
 type Client struct {
-	key      *rsa.PrivateKey
-	host     string
-	port     int
-	nick     string
-	conn     net.Conn
-	done     chan interface{}
-	mu       sync.Mutex
-	prompt   string
-	line     []rune
-	prev     *terminal.State
-	keyStore map[string]rsa.PublicKey
+	key          *rsa.PrivateKey
+	host         string
+	port         int
+	nick         string
+	conn         net.Conn
+	done         chan interface{}
+	mu           sync.Mutex
+	prompt       string
+	line         []rune
+	prev         *terminal.State
+	keyStore     map[string]rsa.PublicKey
+	requestCount int
+	outstanding  map[int]chan Envelope
 }
 
 // establishes a connection to the server
@@ -83,27 +85,14 @@ func (c *Client) handleMessages() {
 
 // handle a message received from the server
 func (c *Client) handleMessage(m Envelope) error {
-	switch m.Kind {
-	case "meta":
-		return c.handleMeta(m.Body)
-	case "note":
-		return c.handleNote(m.Body)
-	case "list-notes":
-		return c.handleListNotes(m.Body)
-	case "key-response":
-		return c.handleKeyResponse(m.Body)
-	default:
-		return fmt.Errorf("received message of unsupported type: %v", m.Kind)
+	res, ok := c.outstanding[m.Id]
+	if !ok {
+		c.info("%v", m)
+		c.err("received message corresponding to no known request id: %d", m.Id)
+		return fmt.Errorf("no such id: %d", m.Id)
 	}
-}
-
-// handles a meta message; that is, a message that is shown to the user
-func (c *Client) handleMeta(body json.RawMessage) error {
-	var meta Meta
-	if err := json.Unmarshal(body, &meta); err != nil {
-		return fmt.Errorf("unable to unmarshal meta message: %v", err)
-	}
-	c.info("message from server: %v", meta)
+	res <- m
+	close(res)
 	return nil
 }
 
@@ -173,23 +162,28 @@ func (c *Client) handleListNotes(raw json.RawMessage) error {
 func (c *Client) handshake() error {
 	r := &Auth{Nick: c.nick, Key: c.key.PublicKey}
 	c.info("authenticating as %s", c.nick)
-	return c.sendRequest(r)
+	_, err := c.sendRequest(r)
+	return err
 }
 
-func (c *Client) sendRequest(r request) error {
-	e, err := wrapRequest(r)
+func (c *Client) sendRequest(r request) (chan Envelope, error) {
+	e, err := wrapRequest(c.requestCount, r)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b, err := json.Marshal(e)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	res := make(chan Envelope, 1)
+	c.outstanding[c.requestCount] = res
+	c.requestCount++
 	c.info("sending json request: %s", b)
 	if _, err := c.conn.Write(b); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return res, nil
 }
 
 func (c *Client) info(template string, args ...interface{}) {
@@ -315,7 +309,7 @@ func (c *Client) createNote(args []string) {
 		c.err("%v", err)
 		return
 	}
-	if err := c.sendRequest(note); err != nil {
+	if _, err := c.sendRequest(note); err != nil {
 		c.err("error sending note: %v", err)
 	}
 }
@@ -330,15 +324,23 @@ func (c *Client) getNote(args []string) {
 		c.err("that doesn't look like an int: %v", err)
 		return
 	}
-	if err := c.sendRequest(GetNoteRequest(id)); err != nil {
+	res, err := c.sendRequest(GetNoteRequest(id))
+	if err != nil {
 		c.err("couldn't request note: %v", err)
 		return
 	}
+	e := <-res
+	c.handleNote(e.Body)
 }
 
 func (c *Client) listNotes(args []string) {
 	r := &ListNotes{N: 10}
-	c.sendRequest(r)
+	res, err := c.sendRequest(r)
+	if err != nil {
+		c.err("%v", err)
+	}
+	e := <-res
+	c.handleListNotes(e.Body)
 }
 
 func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, error) {
@@ -390,10 +392,13 @@ func (c *Client) getKey(args []string) {
 		return
 	}
 	req := KeyRequest(args[0])
-	if err := c.sendRequest(req); err != nil {
+	res, err := c.sendRequest(req)
+	if err != nil {
 		c.err("couldn't send key request: %v", err)
 		return
 	}
+	e := <-res
+	c.handleKeyResponse(e.Body)
 }
 
 func (c *Client) saveKey(nick string, key rsa.PublicKey) {
@@ -571,12 +576,14 @@ func connect() {
 	}
 
 	client := &Client{
-		key:  key,
-		host: options.host,
-		port: options.port,
-		nick: options.nick,
-		done: make(chan interface{}),
-		line: make([]rune, 0, 32),
+		key:         key,
+		host:        options.host,
+		port:        options.port,
+		nick:        options.nick,
+		done:        make(chan interface{}),
+		line:        make([]rune, 0, 32),
+		keyStore:    make(map[string]rsa.PublicKey, 8),
+		outstanding: make(map[int]chan Envelope),
 	}
 	client.run()
 }
