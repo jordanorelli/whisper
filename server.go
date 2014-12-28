@@ -54,6 +54,8 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 		return s.handleKeyRequest(request.Id, request.Body)
 	case "message":
 		return s.handleMessageRequest(request.Id, request.Body)
+	case "list-messages":
+		return s.handleListMessagesRequest(request.Id, request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
@@ -231,6 +233,33 @@ func (s *serverConnection) handleMessageRequest(requestId int, body json.RawMess
 		return fmt.Errorf("unable to save message: %v", err)
 	}
 	return s.sendResponse(requestId, Bool(true))
+}
+
+func (s *serverConnection) handleListMessagesRequest(requestId int, body json.RawMessage) error {
+	var req ListMessages
+	if err := json.Unmarshal(body, &req); err != nil {
+		error_log.Printf("unable to read message request: %v", err)
+		return err
+	}
+
+	prefix := []byte("messages/")
+	messages := make(ListMessagesResponse, 0, 10)
+	fn := func(n int, v []byte) error {
+		var msg Message
+		if err := json.Unmarshal(v, &msg); err != nil {
+			return fmt.Errorf("unable to parse message blob: %v", err)
+		}
+		messages = append(messages, ListMessagesResponseItem{
+			Id:   n,
+			Key:  msg.Key,
+			From: msg.From,
+		})
+		return nil
+	}
+	if err := s.db.collect(prefix, -10, fn); err != nil {
+		return fmt.Errorf("error handling listmessages request: %v", err)
+	}
+	return s.sendResponse(requestId, messages)
 }
 
 func (s *serverConnection) openDB() error {

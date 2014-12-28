@@ -285,6 +285,8 @@ func (c *Client) exec(line string) {
 		c.fetchKey(parts[1:])
 	case "msg/send":
 		c.sendMessage(parts[1:])
+	case "msg/list":
+		c.listMessages(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
 	}
@@ -497,6 +499,42 @@ func (c *Client) sendMessage(args []string) {
 	c.info("%v", <-res)
 }
 
+func (c *Client) listMessages(args []string) {
+	r := &ListMessages{N: 10}
+	promise, err := c.sendRequest(r)
+	if err != nil {
+		c.err("%v", err)
+	}
+	env := <-promise
+
+	writeMessageId := func(id int, from string) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.trunc()
+		fmt.Printf("%d\t%s\n", id, from)
+		c.renderLine()
+	}
+
+	var res ListMessagesResponse
+	if err := json.Unmarshal(env.Body, &res); err != nil {
+		c.err("couldn't read list messages response: %v", err)
+		return
+	}
+	for _, item := range res {
+		key, err := c.rsaDecrypt(item.Key)
+		if err != nil {
+			c.err("unable to read aes key: %v", err)
+			return
+		}
+		from, err := c.aesDecrypt(key, item.From)
+		if err != nil {
+			c.err("unable to read message sender: %v", err)
+			return
+		}
+		writeMessageId(item.Id, string(from))
+	}
+}
+
 func (c *Client) readTextBlock() ([]rune, error) {
 	// god dammit what have i gotten myself into
 	msg := make([]rune, 0, 400)
@@ -640,6 +678,10 @@ func (c *Client) aesEncrypt(key []byte, ptxt []byte) ([]byte, error) {
 	mode.CryptBlocks(ctxt[aes.BlockSize:], ptxt)
 	c.info("aes encryption done")
 	return ctxt, nil
+}
+
+func (c *Client) rsaDecrypt(ctext []byte) ([]byte, error) {
+	return rsa.DecryptPKCS1v15(rand.Reader, c.key, ctext)
 }
 
 func connect() {
