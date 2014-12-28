@@ -1,3 +1,5 @@
+(this project is not yet stable)
+
 get the dependencies:
 
 `go get code.google.com/p/go.crypto/ssh`  
