@@ -282,7 +282,9 @@ func (c *Client) exec(line string) {
 	case "notes/list":
 		c.listNotes(parts[1:])
 	case "keys/get":
-		c.getKey(parts[1:])
+		c.fetchKey(parts[1:])
+	case "msg/send":
+		c.sendMessage(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
 	}
@@ -386,7 +388,7 @@ func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, erro
 // key functions
 // ------------------------------------------------------------------------------
 
-func (c *Client) getKey(args []string) {
+func (c *Client) fetchKey(args []string) {
 	if len(args) != 1 {
 		c.err("keys/get takes exactly one arg")
 		return
@@ -408,16 +410,91 @@ func (c *Client) saveKey(nick string, key rsa.PublicKey) {
 	c.keyStore[nick] = key
 }
 
+func (c *Client) getKey(nick string) (*rsa.PublicKey, error) {
+	if key, ok := c.keyStore[nick]; ok {
+		return &key, nil
+	}
+	c.fetchKey([]string{nick})
+	if key, ok := c.keyStore[nick]; ok {
+		return &key, nil
+	}
+	return nil, fmt.Errorf("no such key")
+}
+
 func (c *Client) handleKeyResponse(body json.RawMessage) error {
-	c.info(string(body))
+	// c.info(string(body))
 	var res KeyResponse
 	if err := json.Unmarshal(body, &res); err != nil {
 		c.err(err.Error())
 		return err
 	}
-	c.info("%v", res)
+	// c.info("%v", res)
 	c.saveKey(res.Nick, res.Key)
 	return nil
+}
+
+// ------------------------------------------------------------------------------
+// message functions
+// ------------------------------------------------------------------------------
+
+func (c *Client) sendMessage(args []string) {
+	if len(args) != 1 {
+		c.err("send message requires exactly 1 arg, saw %d", len(args))
+		return
+	}
+	to := args[0]
+
+	c.info("fetching key...")
+	pkey, err := c.getKey(to)
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+	c.info("ok we have a key")
+
+	text, err := c.readTextBlock()
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	aesKey, err := c.aesKey()
+	if err != nil {
+		c.err("couldn't create an aes key: %v", err)
+		return
+	}
+
+	ctext, err := c.aesEncrypt(aesKey, []byte(string(text)))
+	if err != nil {
+		c.err("couldn't aes encrypt message text: %v", err)
+		return
+	}
+
+	cnick, err := c.aesEncrypt(aesKey, []byte(c.nick))
+	if err != nil {
+		c.err("couldn't aes encrypt nick: %v", err)
+		return
+	}
+
+	ckey, err := rsa.EncryptPKCS1v15(rand.Reader, pkey, aesKey)
+	if err != nil {
+		c.err("couldn't rsa encrypt aes key: %v", err)
+		return
+	}
+
+	m := Message{
+		Key:  ckey,
+		From: cnick,
+		To:   to,
+		Text: ctext,
+	}
+
+	res, err := c.sendRequest(m)
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+	c.info("%v", <-res)
 }
 
 func (c *Client) readTextBlock() ([]rune, error) {

@@ -13,6 +13,12 @@ type Envelope struct {
 	Body json.RawMessage
 }
 
+type Bool bool
+
+func (b Bool) Kind() string {
+	return "bool"
+}
+
 type request interface {
 	Kind() string
 }

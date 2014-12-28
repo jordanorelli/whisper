@@ -52,6 +52,8 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 		return s.handleListNotesRequest(request.Id, request.Body)
 	case "key":
 		return s.handleKeyRequest(request.Id, request.Body)
+	case "message":
+		return s.handleMessageRequest(request.Id, request.Body)
 	default:
 		return fmt.Errorf("no such request type: %v", request.Kind)
 	}
@@ -208,8 +210,31 @@ func (s *serverConnection) handleKeyRequest(requestId int, body json.RawMessage)
 	return s.sendResponse(requestId, res)
 }
 
+func (s *serverConnection) handleMessageRequest(requestId int, body json.RawMessage) error {
+	var req Message
+	if err := json.Unmarshal(body, &req); err != nil {
+		error_log.Printf("unable to read message request: %v", err)
+		return err
+	}
+
+	db, err := getUserDB(req.To, false)
+	if err != nil {
+		return err
+	}
+
+	k, err := db.nextKey("messages/")
+	if err != nil {
+		return fmt.Errorf("unable to save message: %v", err)
+	}
+
+	if err := db.Put([]byte(k), body, nil); err != nil {
+		return fmt.Errorf("unable to save message: %v", err)
+	}
+	return s.sendResponse(requestId, Bool(true))
+}
+
 func (s *serverConnection) openDB() error {
-	db, err := getUserDB(s.nick)
+	db, err := getUserDB(s.nick, true)
 	if err != nil {
 		return err
 	}
