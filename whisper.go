@@ -46,9 +46,9 @@ func main() {
 	}
 
 	switch flag.Arg(0) {
-	case "dial":
+	case "client":
 		connect()
-	case "listen":
+	case "server":
 		serve()
 	case "generate":
 		generate()
