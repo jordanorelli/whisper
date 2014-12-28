@@ -287,6 +287,8 @@ func (c *Client) exec(line string) {
 		c.sendMessage(parts[1:])
 	case "msg/list":
 		c.listMessages(parts[1:])
+	case "msg/get":
+		c.getMessage(parts[1:])
 	default:
 		c.err("unrecognized client command: %s", parts[0])
 	}
@@ -533,6 +535,65 @@ func (c *Client) listMessages(args []string) {
 		}
 		writeMessageId(item.Id, string(from))
 	}
+}
+
+func (c *Client) getMessage(args []string) {
+	if len(args) != 1 {
+		c.err("msg/get requires exactly 1 argument: the id of the message to get")
+		return
+	}
+
+	id, err := strconv.Atoi(args[0])
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	promise, err := c.sendRequest(GetMessage{Id: id})
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	raw := <-promise
+
+	var msg Message
+	if err := json.Unmarshal(raw.Body, &msg); err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	key, err := c.rsaDecrypt(msg.Key)
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	from, err := c.aesDecrypt(key, msg.From)
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	text, err := c.aesDecrypt(key, msg.Text)
+	if err != nil {
+		c.err("%v", err)
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.trunc()
+	fmt.Print("\033[37m")
+	fmt.Print("\rFrom: ")
+	fmt.Print("\033[0m") // unset color choice
+	fmt.Println(string(from))
+	fmt.Print("\033[90m# ")
+	fmt.Println("--------------------------------------------------------------------------------")
+	fmt.Printf("\033[0m")
+	fmt.Println(string(text))
+	c.renderLine()
 }
 
 func (c *Client) readTextBlock() ([]rune, error) {

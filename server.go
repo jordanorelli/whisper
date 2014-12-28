@@ -54,6 +54,8 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 		return s.handleKeyRequest(request.Id, request.Body)
 	case "message":
 		return s.handleMessageRequest(request.Id, request.Body)
+	case "get-message":
+		return s.handleGetMessageRequest(request.Id, request.Body)
 	case "list-messages":
 		return s.handleListMessagesRequest(request.Id, request.Body)
 	default:
@@ -233,6 +235,25 @@ func (s *serverConnection) handleMessageRequest(requestId int, body json.RawMess
 		return fmt.Errorf("unable to save message: %v", err)
 	}
 	return s.sendResponse(requestId, Bool(true))
+}
+
+func (s *serverConnection) handleGetMessageRequest(requestId int, body json.RawMessage) error {
+	var req GetMessage
+	if err := json.Unmarshal(body, &req); err != nil {
+		return fmt.Errorf("unable to read getmessage request: %v", err)
+	}
+
+	key := fmt.Sprintf("messages/%s", encodeInt(req.Id))
+	val, err := s.db.Get([]byte(key), nil)
+	if err != nil {
+		return fmt.Errorf("unable to read message: %v", err)
+	}
+
+	var msg Message
+	if err := json.Unmarshal(val, &msg); err != nil {
+		return fmt.Errorf("unable to parse message: %v", err)
+	}
+	return s.sendResponse(requestId, msg)
 }
 
 func (s *serverConnection) handleListMessagesRequest(requestId int, body json.RawMessage) error {
