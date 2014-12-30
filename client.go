@@ -20,7 +20,7 @@ import (
 
 type Auth struct {
 	Nick string
-	Key  rsa.PublicKey
+	Key  *rsa.PublicKey
 }
 
 func (a *Auth) Kind() string {
@@ -85,6 +85,7 @@ func (c *Client) handleMessages() {
 
 // handle a message received from the server
 func (c *Client) handleMessage(m Envelope) error {
+	c.info("received response for message %d", m.Id)
 	res, ok := c.outstanding[m.Id]
 	if !ok {
 		c.info("%v", m)
@@ -160,9 +161,27 @@ func (c *Client) handleListNotes(raw json.RawMessage) error {
 }
 
 func (c *Client) handshake() error {
-	r := &Auth{Nick: c.nick, Key: c.key.PublicKey}
+	r := &Auth{Nick: c.nick, Key: &c.key.PublicKey}
 	c.info("authenticating as %s", c.nick)
-	_, err := c.sendRequest(r)
+	promise, err := c.sendRequest(r)
+	if err != nil {
+		return err
+	}
+	res := <-promise
+	switch res.Kind {
+	case "error":
+		var e ErrorDoc
+		if err := json.Unmarshal(res.Body, &e); err != nil {
+			return fmt.Errorf("cannot read server error: %v", err)
+		}
+		c.err("server error: %v", e.Error())
+		close(c.done)
+	case "bool":
+		c.info(string(res.Body))
+	default:
+		c.err("i dunno what to do with this")
+		close(c.done)
+	}
 	return err
 }
 

@@ -91,7 +91,7 @@ func getUserDB(nick string, create bool) (*userdb, error) {
 	}
 
 	opts := &opt.Options{
-		ErrorIfMissing: create,
+		ErrorIfMissing: !create,
 	}
 	path := fmt.Sprintf("./%s.db", nick)
 	conn, err := leveldb.OpenFile(path, opts)

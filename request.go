@@ -8,9 +8,9 @@ import (
 )
 
 type Envelope struct {
-	Id   int
-	Kind string
-	Body json.RawMessage
+	Id   int             `json:"id"`
+	Kind string          `json:"kind"`
+	Body json.RawMessage `json:"body"`
 }
 
 type Bool bool

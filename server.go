@@ -31,7 +31,7 @@ func stream(r io.Reader, c chan Envelope, e chan error, done chan interface{}) {
 type serverConnection struct {
 	conn net.Conn
 	nick string
-	key  rsa.PublicKey
+	key  *rsa.PublicKey
 	db   *userdb
 }
 
@@ -68,9 +68,14 @@ func (s *serverConnection) handleAuthRequest(requestId int, body json.RawMessage
 	if err := json.Unmarshal(body, &auth); err != nil {
 		return fmt.Errorf("bad auth request: %v", err)
 	}
+	if auth.Nick == "" {
+		return fmt.Errorf("empty username")
+	}
 	s.nick = auth.Nick
+	if auth.Key == nil {
+		return fmt.Errorf("empty key")
+	}
 	s.key = auth.Key
-	// s.sendMeta("hello, %s", auth.Nick)
 	if err := s.openDB(); err != nil {
 		return fmt.Errorf("failed to open user database: %v", err)
 	}
@@ -79,36 +84,29 @@ func (s *serverConnection) handleAuthRequest(requestId int, body json.RawMessage
 	case leveldb.ErrNotFound:
 		keybytes, err := json.Marshal(auth.Key)
 		if err != nil {
-			error_log.Printf("motherfucking bullshit fuck shit fuck: %v", err)
-			break
+			return fmt.Errorf("cannot marshal auth key: %v", err)
 		}
 		if err := s.db.Put([]byte("public_key"), keybytes, nil); err != nil {
-			error_log.Printf("man fuck all this stupid key bullshit i hate it: %v", err)
-			break
+			return fmt.Errorf("cannot write public key to database: %v", err)
 		}
 		info_log.Printf("saved key for user %s", auth.Nick)
 	case nil:
 		var key rsa.PublicKey
 		if err := json.Unmarshal(b, &key); err != nil {
-			error_log.Printf("ok no i can't even do this key unmarshal shit: %v", err)
-			break
+			return fmt.Errorf("cannot unmarshal auth key from request: %v", err)
 		}
 		if auth.Key.E != key.E {
-			error_log.Printf("that's totally the wrong key!  hang up.  just hang up.")
-			// todo: make there be a way to hang up lol
-			break
+			return fmt.Errorf("client presented wrong auth key")
 		}
 		if auth.Key.N.Cmp(key.N) != 0 {
-			error_log.Printf("that's totally the wrong key!  hang up.  just hang up.")
-			// todo: make there be a way to hang up lol
-			break
+			return fmt.Errorf("client presented wrong auth key")
 		}
-		info_log.Printf("ok the key checks out.")
 	default:
-		error_log.Printf("unable to get public key for user %s: %v", auth.Nick, err)
+		return fmt.Errorf("unable to read public key: %v", err)
 	}
 	info_log.Printf("%s", b)
 	info_log.Printf("authenticated user %s", auth.Nick)
+	s.sendResponse(requestId, Bool(true))
 	return nil
 }
 
@@ -145,14 +143,11 @@ func (s *serverConnection) handleGetNoteRequest(requestId int, body json.RawMess
 	if err != nil {
 		return fmt.Errorf("couldn't retrieve note: %v", err)
 	}
-	raw, err := json.Marshal(&Envelope{Kind: "note", Body: b})
-	if err != nil {
-		return fmt.Errorf("couldn't send note back to client: %v", err)
+	var note EncryptedNote
+	if err := json.Unmarshal(b, &note); err != nil {
+		return fmt.Errorf("couldn't unmarshal note: %v", err)
 	}
-	if _, err := s.conn.Write(raw); err != nil {
-		return fmt.Errorf("couldn't send note back to client: %v", err)
-	}
-	return nil
+	return s.sendResponse(requestId, note)
 }
 
 func (s *serverConnection) handleListNotesRequest(requestId int, body json.RawMessage) error {
@@ -307,6 +302,7 @@ func (s *serverConnection) run() {
 		case request := <-requests:
 			if err := s.handleRequest(request); err != nil {
 				error_log.Printf("client error: %v", err)
+				s.sendResponse(request.Id, ErrorDoc(err.Error()))
 			}
 		case err := <-errors:
 			error_log.Printf("connection error: %v", err)
