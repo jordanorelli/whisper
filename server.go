@@ -72,7 +72,7 @@ func (s *serverConnection) handleAuthRequest(requestId int, body json.RawMessage
 	s.key = auth.Key
 	// s.sendMeta("hello, %s", auth.Nick)
 	if err := s.openDB(); err != nil {
-		error_log.Printf("failed to open database: %v", err)
+		return fmt.Errorf("failed to open user database: %v", err)
 	}
 	b, err := s.db.Get([]byte("public_key"), nil)
 	switch err {

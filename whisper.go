@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-const keyLength = 4096
+const keyLength = 2048
 
 var (
 	info_log  *log.Logger
