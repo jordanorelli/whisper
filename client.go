@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,7 +37,7 @@ type Client struct {
 	prev         *terminal.State
 	keyStore     map[string]rsa.PublicKey
 	requestCount int
-	outstanding  map[int]chan Envelope
+	outstanding  map[int]chan request
 }
 
 // establishes a connection to the server
@@ -77,24 +78,23 @@ func (c *Client) handleMessages() {
 // handle a message received from the server
 func (c *Client) handleMessage(m Envelope) error {
 	c.info("received response for message %d", m.Id)
-	res, ok := c.outstanding[m.Id]
+	p, ok := c.outstanding[m.Id]
 	if !ok {
 		c.info("%v", m)
 		c.err("received message corresponding to no known request id: %d", m.Id)
 		return fmt.Errorf("no such id: %d", m.Id)
 	}
-	res <- m
-	close(res)
+	r, err := m.Open()
+	if err != nil {
+		p <- ErrorDoc(err.Error())
+	} else {
+		p <- r
+	}
+	close(p)
 	return nil
 }
 
-func (c *Client) handleNote(raw json.RawMessage) error {
-	c.info("unmarshaling note...")
-	var enote EncryptedNote
-	if err := json.Unmarshal(raw, &enote); err != nil {
-		return fmt.Errorf("unable to unmarshal encrypted note: %v", err)
-	}
-
+func (c *Client) handleNote(enote *EncryptedNote) error {
 	c.info("aes key ciphertext: %x", enote.Key)
 	key, err := rsa.DecryptPKCS1v15(rand.Reader, c.key, enote.Key)
 	if err != nil {
@@ -119,12 +119,7 @@ func (c *Client) handleNote(raw json.RawMessage) error {
 	return nil
 }
 
-func (c *Client) handleListNotes(raw json.RawMessage) error {
-	var notes ListNotesResponse
-	if err := json.Unmarshal(raw, &notes); err != nil {
-		return fmt.Errorf("unable to unmarshal listnotes response: %v", err)
-	}
-
+func (c *Client) handleListNotes(notes ListNotesResponse) error {
 	writeNoteTitle := func(id int, title string) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -159,25 +154,20 @@ func (c *Client) handshake() error {
 		return err
 	}
 	res := <-promise
-	switch res.Kind {
-	case "error":
-		var e ErrorDoc
-		if err := json.Unmarshal(res.Body, &e); err != nil {
-			return fmt.Errorf("cannot read server error: %v", err)
-		}
-		c.err("server error: %v", e.Error())
+	switch v := res.(type) {
+	case *ErrorDoc:
 		close(c.done)
-	case "bool":
-		c.info(string(res.Body))
+		return v
+	case *Bool:
 		c.renderLine()
+		return nil
 	default:
-		c.err("i dunno what to do with this")
 		close(c.done)
+		return fmt.Errorf("received response of unexpected type: %v", reflect.TypeOf(v))
 	}
-	return err
 }
 
-func (c *Client) sendRequest(r request) (chan Envelope, error) {
+func (c *Client) sendRequest(r request) (chan request, error) {
 	e, err := wrapRequest(c.requestCount, r)
 	if err != nil {
 		return nil, err
@@ -187,7 +177,7 @@ func (c *Client) sendRequest(r request) (chan Envelope, error) {
 		return nil, err
 	}
 
-	res := make(chan Envelope, 1)
+	res := make(chan request, 1)
 	c.outstanding[c.requestCount] = res
 	c.requestCount++
 	c.info("sending json request: %s", b)
@@ -344,23 +334,41 @@ func (c *Client) getNote(args []string) {
 		c.err("that doesn't look like an int: %v", err)
 		return
 	}
-	res, err := c.sendRequest(GetNoteRequest{Id: id})
+	p, err := c.sendRequest(GetNoteRequest{Id: id})
 	if err != nil {
 		c.err("couldn't request note: %v", err)
 		return
 	}
-	e := <-res
-	c.handleNote(e.Body)
+	res := <-p
+	switch v := res.(type) {
+	case *EncryptedNote:
+		c.handleNote(v)
+	case *ErrorDoc:
+		c.err("error getting note: %v", v.Error())
+		c.renderLine()
+	default:
+		c.err("received response of unexpected type: %v", reflect.TypeOf(v))
+		c.renderLine()
+	}
 }
 
 func (c *Client) listNotes(args []string) {
 	r := &ListNotes{N: 10}
-	res, err := c.sendRequest(r)
+	p, err := c.sendRequest(r)
 	if err != nil {
 		c.err("%v", err)
 	}
-	e := <-res
-	c.handleListNotes(e.Body)
+	res := <-p
+	switch v := res.(type) {
+	case *ListNotesResponse:
+		c.handleListNotes(*v)
+	case *ErrorDoc:
+		c.err("error retrieving list of notes: %v", v.Error())
+		c.renderLine()
+	default:
+		c.err("received response of unexpected type: %v", reflect.TypeOf(v))
+		c.renderLine()
+	}
 }
 
 func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, error) {
@@ -412,13 +420,21 @@ func (c *Client) fetchKey(args []string) {
 		return
 	}
 	req := KeyRequest(args[0])
-	res, err := c.sendRequest(req)
+	p, err := c.sendRequest(req)
 	if err != nil {
 		c.err("couldn't send key request: %v", err)
 		return
 	}
-	e := <-res
-	c.handleKeyResponse(e.Body)
+	res := <-p
+	switch v := res.(type) {
+	case *KeyResponse:
+		c.saveKey(v.Nick, v.Key)
+	case *ErrorDoc:
+		c.err("error fetching key: %v", v.Error())
+	default:
+		c.err("received response of unexpected type: %v", reflect.TypeOf(v))
+	}
+	c.renderLine()
 }
 
 func (c *Client) saveKey(nick string, key rsa.PublicKey) {
@@ -518,11 +534,10 @@ func (c *Client) sendMessage(args []string) {
 
 func (c *Client) listMessages(args []string) {
 	r := &ListMessages{N: 10}
-	promise, err := c.sendRequest(r)
+	p, err := c.sendRequest(r)
 	if err != nil {
 		c.err("%v", err)
 	}
-	env := <-promise
 
 	writeMessageId := func(id int, from string) {
 		c.mu.Lock()
@@ -532,23 +547,29 @@ func (c *Client) listMessages(args []string) {
 		c.renderLine()
 	}
 
-	var res ListMessagesResponse
-	if err := json.Unmarshal(env.Body, &res); err != nil {
-		c.err("couldn't read list messages response: %v", err)
+	res := <-p
+	switch v := res.(type) {
+	case *ErrorDoc:
+		c.err("error getting message list: %v", v.Error())
+		c.renderLine()
+	case *ListMessagesResponse:
+		for _, item := range *v {
+			key, err := c.rsaDecrypt(item.Key)
+			if err != nil {
+				c.err("unable to read aes key: %v", err)
+				return
+			}
+			from, err := c.aesDecrypt(key, item.From)
+			if err != nil {
+				c.err("unable to read message sender: %v", err)
+				return
+			}
+			writeMessageId(item.Id, string(from))
+		}
+	default:
+		c.err("received response of unexpected type: %v", reflect.TypeOf(v))
+		c.renderLine()
 		return
-	}
-	for _, item := range res {
-		key, err := c.rsaDecrypt(item.Key)
-		if err != nil {
-			c.err("unable to read aes key: %v", err)
-			return
-		}
-		from, err := c.aesDecrypt(key, item.From)
-		if err != nil {
-			c.err("unable to read message sender: %v", err)
-			return
-		}
-		writeMessageId(item.Id, string(from))
 	}
 }
 
@@ -564,51 +585,53 @@ func (c *Client) getMessage(args []string) {
 		return
 	}
 
-	promise, err := c.sendRequest(GetMessage{Id: id})
+	p, err := c.sendRequest(GetMessage{Id: id})
 	if err != nil {
 		c.err("%v", err)
 		return
 	}
 
-	raw := <-promise
+	res := <-p
+	switch v := res.(type) {
+	case *Message:
+		key, err := c.rsaDecrypt(v.Key)
+		if err != nil {
+			c.err("%v", err)
+			return
+		}
 
-	var msg Message
-	if err := json.Unmarshal(raw.Body, &msg); err != nil {
-		c.err("%v", err)
-		return
+		from, err := c.aesDecrypt(key, v.From)
+		if err != nil {
+			c.err("%v", err)
+			return
+		}
+
+		text, err := c.aesDecrypt(key, v.Text)
+		if err != nil {
+			c.err("%v", err)
+			return
+		}
+
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		c.trunc()
+		fmt.Print("\033[37m")
+		fmt.Print("\rFrom: ")
+		fmt.Print("\033[0m") // unset color choice
+		fmt.Println(string(from))
+		fmt.Print("\033[90m")
+		fmt.Println("--------------------------------------------------------------------------------")
+		fmt.Printf("\033[0m")
+		fmt.Println(string(text))
+		c.renderLine()
+	case *ErrorDoc:
+		c.err("error getting message: %v", v.Error())
+		c.renderLine()
+	default:
+		c.err("received response of unexpected type: %v", reflect.TypeOf(v))
+		c.renderLine()
 	}
-
-	key, err := c.rsaDecrypt(msg.Key)
-	if err != nil {
-		c.err("%v", err)
-		return
-	}
-
-	from, err := c.aesDecrypt(key, msg.From)
-	if err != nil {
-		c.err("%v", err)
-		return
-	}
-
-	text, err := c.aesDecrypt(key, msg.Text)
-	if err != nil {
-		c.err("%v", err)
-		return
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.trunc()
-	fmt.Print("\033[37m")
-	fmt.Print("\rFrom: ")
-	fmt.Print("\033[0m") // unset color choice
-	fmt.Println(string(from))
-	fmt.Print("\033[90m")
-	fmt.Println("--------------------------------------------------------------------------------")
-	fmt.Printf("\033[0m")
-	fmt.Println(string(text))
-	c.renderLine()
 }
 
 func (c *Client) readTextBlock() ([]rune, error) {
@@ -778,7 +801,7 @@ func connect() {
 		done:        make(chan interface{}),
 		line:        make([]rune, 0, 32),
 		keyStore:    make(map[string]rsa.PublicKey, 8),
-		outstanding: make(map[int]chan Envelope),
+		outstanding: make(map[int]chan request),
 	}
 	client.run()
 }
