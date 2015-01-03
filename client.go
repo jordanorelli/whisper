@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"code.google.com/p/go.crypto/ssh/terminal"
 	"crypto/aes"
 	"crypto/cipher"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Client struct {
@@ -304,6 +306,7 @@ func (c *Client) createNote(args []string) {
 	}
 	title := strings.Join(args, " ")
 	c.info("creating new note: %s", title)
+
 	msg, err := c.readTextBlock()
 	if err != nil {
 		c.err("%v", err)
@@ -366,11 +369,11 @@ func (c *Client) listNotes(args []string) {
 	}
 }
 
-func (c *Client) encryptNote(title string, message []rune) (*EncryptedNote, error) {
+func (c *Client) encryptNote(title string, message []byte) (*EncryptedNote, error) {
 	c.info("encrypting note...")
 	note := &Note{
 		Title: title,
-		Body:  []byte(string(message)),
+		Body:  message,
 	}
 
 	c.info("generating random aes key")
@@ -629,44 +632,45 @@ func (c *Client) getMessage(args []string) {
 	}
 }
 
-func (c *Client) readTextBlock() ([]rune, error) {
+func (c *Client) readTextBlock() ([]byte, error) {
 	// god dammit what have i gotten myself into
-	msg := make([]rune, 0, 400)
+	var buf bytes.Buffer
 	fmt.Print("\033[1K") // clear to beginning of current line
 	fmt.Print("\r")      // move to beginning of current line
 	fmt.Print("\033[s")  // save the cursor position
 	renderMsg := func() {
 		fmt.Print("\033[u")           // restore cursor position
 		fmt.Print("\033[0J")          // clear to screen end
-		fmt.Printf("%s", string(msg)) // write message out
+		fmt.Printf("%s", buf.Bytes()) // write message out
 	}
 	in := bufio.NewReader(os.Stdin)
 	for {
 		r, _, err := in.ReadRune()
 		switch err {
 		case io.EOF:
-			return msg, nil
+			return buf.Bytes(), nil
 		case nil:
 		default:
 			return nil, fmt.Errorf("error reading textblock: %v", err)
 		}
 		if unicode.IsGraphic(r) {
-			msg = append(msg, r)
+			buf.WriteRune(r)
 			renderMsg()
 			continue
 		}
 		switch r {
 		case 13: // enter
-			msg = append(msg, '\n')
+			buf.WriteRune('\n')
 			renderMsg()
 		case 127: // backspace
-			if len(msg) == 0 {
+			if buf.Len() == 0 {
 				break
 			}
-			msg = msg[:len(msg)-1]
+			_, n := utf8.DecodeLastRune(buf.Bytes())
+			buf.Truncate(buf.Len() - n)
 			renderMsg()
 		case 4: // ctrl+d
-			return msg, nil
+			return buf.Bytes(), nil
 		}
 	}
 }
