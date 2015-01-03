@@ -11,3 +11,5 @@ func (e ErrorDoc) Kind() string {
 func (e ErrorDoc) Error() string {
 	return string(e)
 }
+
+func init() { registerRequestType(func() request { return new(ErrorDoc) }) }

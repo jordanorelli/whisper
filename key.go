@@ -126,6 +126,8 @@ func (k KeyRequest) Nick() string {
 	return string(k)
 }
 
+func init() { registerRequestType(func() request { return new(KeyRequest) }) }
+
 type KeyResponse struct {
 	Nick string
 	Key  rsa.PublicKey
@@ -134,3 +136,5 @@ type KeyResponse struct {
 func (k KeyResponse) Kind() string {
 	return "key-response"
 }
+
+func init() { registerRequestType(func() request { return new(KeyResponse) }) }

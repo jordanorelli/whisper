@@ -344,7 +344,7 @@ func (c *Client) getNote(args []string) {
 		c.err("that doesn't look like an int: %v", err)
 		return
 	}
-	res, err := c.sendRequest(GetNoteRequest(id))
+	res, err := c.sendRequest(GetNoteRequest{Id: id})
 	if err != nil {
 		c.err("couldn't request note: %v", err)
 		return

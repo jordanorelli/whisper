@@ -12,3 +12,5 @@ type AuthRequest struct {
 func (a *AuthRequest) Kind() string {
 	return "auth"
 }
+
+func init() { registerRequestType(func() request { return new(AuthRequest) }) }

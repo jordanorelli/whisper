@@ -13,6 +13,8 @@ func (m Message) Kind() string {
 	return "send-message"
 }
 
+func init() { registerRequestType(func() request { return new(Message) }) }
+
 type ListMessages struct {
 	N int
 }
@@ -20,6 +22,8 @@ type ListMessages struct {
 func (l ListMessages) Kind() string {
 	return "list-messages"
 }
+
+func init() { registerRequestType(func() request { return new(ListMessages) }) }
 
 type ListMessagesResponseItem struct {
 	Id   int
@@ -33,6 +37,8 @@ func (l ListMessagesResponse) Kind() string {
 	return "list-messages-response"
 }
 
+func init() { registerRequestType(func() request { return new(ListMessagesResponse) }) }
+
 type GetMessage struct {
 	Id int
 }
@@ -40,3 +46,5 @@ type GetMessage struct {
 func (g GetMessage) Kind() string {
 	return "get-message"
 }
+
+func init() { registerRequestType(func() request { return new(GetMessage) }) }

@@ -138,7 +138,7 @@ func (s *serverConnection) handleGetNoteRequest(requestId int, body json.RawMess
 	if err := json.Unmarshal(body, &req); err != nil {
 		return fmt.Errorf("bad getnote request: %v", err)
 	}
-	key := fmt.Sprintf("notes/%s", encodeInt(int(req)))
+	key := fmt.Sprintf("notes/%s", encodeInt(int(req.Id)))
 	b, err := s.db.Get([]byte(key), nil)
 	if err != nil {
 		return fmt.Errorf("couldn't retrieve note: %v", err)

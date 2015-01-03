@@ -15,11 +15,15 @@ func decodeInt(s string) (int, error) {
 	return numEncoder.DecodeInt(s)
 }
 
-type GetNoteRequest int
+type GetNoteRequest struct {
+	Id int
+}
 
 func (g GetNoteRequest) Kind() string {
 	return "get-note"
 }
+
+func init() { registerRequestType(func() request { return new(GetNoteRequest) }) }
 
 type Note struct {
 	Title string
@@ -31,6 +35,8 @@ type EncryptedNote struct {
 	Title []byte
 	Body  []byte
 }
+
+func init() { registerRequestType(func() request { return new(EncryptedNote) }) }
 
 func (n EncryptedNote) Kind() string {
 	return "note"
@@ -53,6 +59,8 @@ func (l ListNotes) Kind() string {
 	return "list-notes-request"
 }
 
+func init() { registerRequestType(func() request { return new(ListNotes) }) }
+
 type ListNotesResponseItem struct {
 	Id    int
 	Key   []byte
@@ -64,3 +72,5 @@ type ListNotesResponse []ListNotesResponseItem
 func (l ListNotesResponse) Kind() string {
 	return "list-notes-response"
 }
+
+func init() { registerRequestType(func() request { return new(ListNotesResponse) }) }
