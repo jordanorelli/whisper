@@ -19,11 +19,6 @@ import (
 	"unicode"
 )
 
-type ReadWriter struct {
-	io.Reader
-	io.Writer
-}
-
 type Client struct {
 	key          *rsa.PrivateKey
 	host         string
