@@ -10,7 +10,7 @@ type Message struct {
 }
 
 func (m Message) Kind() string {
-	return "message"
+	return "send-message"
 }
 
 type ListMessages struct {

@@ -64,7 +64,7 @@ func decodeRequest(conn net.Conn) (request, error) {
 	}
 	switch env.Kind {
 	case "auth":
-		var auth Auth
+		var auth AuthRequest
 		if err := json.Unmarshal(env.Body, &auth); err != nil {
 			return nil, fmt.Errorf("unable to unmarshal auth request: %v", err)
 		}

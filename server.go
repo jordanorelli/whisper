@@ -48,11 +48,11 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 		return s.handleNoteRequest(request.Id, request.Body)
 	case "get-note":
 		return s.handleGetNoteRequest(request.Id, request.Body)
-	case "list-notes":
+	case "list-notes-request":
 		return s.handleListNotesRequest(request.Id, request.Body)
-	case "key":
+	case "get-key":
 		return s.handleKeyRequest(request.Id, request.Body)
-	case "message":
+	case "send-message":
 		return s.handleMessageRequest(request.Id, request.Body)
 	case "get-message":
 		return s.handleGetMessageRequest(request.Id, request.Body)
@@ -64,7 +64,7 @@ func (s *serverConnection) handleRequest(request Envelope) error {
 }
 
 func (s *serverConnection) handleAuthRequest(requestId int, body json.RawMessage) error {
-	var auth Auth
+	var auth AuthRequest
 	if err := json.Unmarshal(body, &auth); err != nil {
 		return fmt.Errorf("bad auth request: %v", err)
 	}

@@ -50,7 +50,7 @@ type ListNotes struct {
 }
 
 func (l ListNotes) Kind() string {
-	return "list-notes"
+	return "list-notes-request"
 }
 
 type ListNotesResponseItem struct {
@@ -62,5 +62,5 @@ type ListNotesResponseItem struct {
 type ListNotesResponse []ListNotesResponseItem
 
 func (l ListNotesResponse) Kind() string {
-	return "list-notes"
+	return "list-notes-response"
 }

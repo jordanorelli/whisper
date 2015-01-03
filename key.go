@@ -119,7 +119,7 @@ func getPublic() {
 type KeyRequest string
 
 func (k KeyRequest) Kind() string {
-	return "key"
+	return "get-key"
 }
 
 func (k KeyRequest) Nick() string {

@@ -4,11 +4,11 @@ import (
 	"crypto/rsa"
 )
 
-type Auth struct {
+type AuthRequest struct {
 	Nick string
 	Key  *rsa.PublicKey
 }
 
-func (a *Auth) Kind() string {
+func (a *AuthRequest) Kind() string {
 	return "auth"
 }

@@ -152,7 +152,7 @@ func (c *Client) handleListNotes(raw json.RawMessage) error {
 }
 
 func (c *Client) handshake() error {
-	r := &Auth{Nick: c.nick, Key: &c.key.PublicKey}
+	r := &AuthRequest{Nick: c.nick, Key: &c.key.PublicKey}
 	c.info("authenticating as %s", c.nick)
 	promise, err := c.sendRequest(r)
 	if err != nil {
