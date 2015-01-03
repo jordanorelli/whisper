@@ -197,6 +197,9 @@ func (c *Client) sendRequest(r request) (chan Envelope, error) {
 }
 
 func (c *Client) info(template string, args ...interface{}) {
+	if !options.debug {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

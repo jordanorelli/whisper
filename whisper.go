@@ -21,6 +21,7 @@ var options struct {
 	key       string
 	publicKey string
 	nick      string
+	debug     bool
 }
 
 func exit(status int, template string, args ...interface{}) {
@@ -69,4 +70,5 @@ func init() {
 	flag.StringVar(&options.key, "key", "whisper_key", "rsa key to use")
 	flag.StringVar(&options.publicKey, "public-key", "", "public rsa key to use")
 	flag.StringVar(&options.nick, "nick", "", "nick to use in chat")
+	flag.BoolVar(&options.debug, "debug", false, "include debug messages")
 }
