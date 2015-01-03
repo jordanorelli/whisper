@@ -169,6 +169,7 @@ func (c *Client) handshake() error {
 		close(c.done)
 	case "bool":
 		c.info(string(res.Body))
+		c.renderLine()
 	default:
 		c.err("i dunno what to do with this")
 		close(c.done)
@@ -512,6 +513,7 @@ func (c *Client) sendMessage(args []string) {
 		return
 	}
 	c.info("%v", <-res)
+	c.renderLine()
 }
 
 func (c *Client) listMessages(args []string) {
@@ -602,7 +604,7 @@ func (c *Client) getMessage(args []string) {
 	fmt.Print("\rFrom: ")
 	fmt.Print("\033[0m") // unset color choice
 	fmt.Println(string(from))
-	fmt.Print("\033[90m# ")
+	fmt.Print("\033[90m")
 	fmt.Println("--------------------------------------------------------------------------------")
 	fmt.Printf("\033[0m")
 	fmt.Println(string(text))
