@@ -1,0 +1,11 @@
+package: github.com/jordanorelli/whisper
+import:
+- package: golang.org/x/crypto/ssh
+  subpackages:
+  - ssh/terminal
+- package: github.com/jordanorelli/lexnum
+- package: github.com/syndtr/goleveldb
+  subpackages:
+  - leveldb
+  - leveldb/opt
+  - leveldb/util

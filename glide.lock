@@ -1,0 +1,28 @@
+hash: 89cafe8389a4eccb01f83ff85e87179abeca7c487281cc13425c093a95e9de6f
+updated: 2016-06-08T23:13:00.390182606-04:00
+imports:
+- name: github.com/golang/snappy
+  version: d9eb7a3d35ec988b8585d4a0068e462c27d28380
+- name: github.com/jordanorelli/lexnum
+  version: 460eeb125754d395da7c4dc1680a647dcb0e5bea
+- name: github.com/syndtr/goleveldb
+  version: fa5b5c78794bc5c18f330361059f871ae8c2b9d6
+  subpackages:
+  - leveldb
+  - leveldb/opt
+  - leveldb/util
+  - leveldb/cache
+  - leveldb/comparer
+  - leveldb/errors
+  - leveldb/filter
+  - leveldb/iterator
+  - leveldb/journal
+  - leveldb/memdb
+  - leveldb/storage
+  - leveldb/table
+- name: golang.org/x/crypto
+  version: 77f4136a99ffb5ecdbdd0226bd5cb146cf56bc0e
+  subpackages:
+  - ssh/terminal
+  - ssh
+devImports: []
